@@ -40,8 +40,7 @@ class BaseDataFetcher(ABC):
             return pd.read_csv(my_file)
         return None
     
-    def transform_raw_data(self, orders):
-        df = pd.DataFrame(orders).reset_index()
+    def transform_raw_data(self, df):
         
         df["log_return"] = np.log(df["close"]).diff().fillna(0)
         df["asset_return"] = df["close"] / df["close"].shift()
@@ -59,7 +58,7 @@ class CryptoDataFetcher(BaseDataFetcher):
     
     def get_symbols(self):
         markets = self.exchange.load_markets()
-        return markets.keys()  
+        return list(markets.keys())
     
     def get_earliest(self, market):
         since = self.exchange.parse8601('2010-01-01' + "T00:00:00Z")
@@ -70,7 +69,7 @@ class CryptoDataFetcher(BaseDataFetcher):
                 earliest = orders[0][0]
                 return earliest
             else:
-                since += (1000 * 60 * 60 * 24 * 30)
+                since += (1000 * 60 * 60 * 24 * 30) # shift forward 30 days
 
     def handle_time_boundaries(self, start, end, market):
         earliest = self.get_earliest(market)
@@ -116,10 +115,11 @@ class CryptoDataFetcher(BaseDataFetcher):
             print(f'cached {filename}')
             return cached_df
         else:
-            all_orders = self.fetch_exchange_data(market, step, since, until)
-            df = self.transform_raw_data(all_orders)
+            df_list = self.fetch_exchange_data(market, step, since, until)
+            df = pd.DataFrame(df_list).reset_index()
             df.rename(columns={0: "milliseconds", 1: "open", 2: "high", 3: "low", 4: "close", 5: "volume"}, inplace=True)
             df["dt"] = df["milliseconds"].apply(lambda x: self.exchange.iso8601(x))
+            df = self.transform_raw_data(df)
             self.save_to_file(df, filename)
             return df
         
@@ -173,7 +173,7 @@ class AlpacaDataFetcher(BaseDataFetcher):
         return bars.df
 
     def get_data(self, start="earliest", end="latest", market="BTC/USDT", step="1h"):
-        since, until = self.handle_time_boundaries(start, end, market)
+        since, until = self.handle_time_boundaries(start, end)
         since_str = since.strftime("%Y-%m-%d")
         until_str = until.strftime("%Y-%m-%d")
         
