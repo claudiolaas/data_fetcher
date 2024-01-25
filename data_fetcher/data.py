@@ -1,3 +1,5 @@
+import time
+import requests
 import ccxt
 from datetime import datetime
 from pathlib import Path
@@ -9,6 +11,8 @@ from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 import json
 from alpaca_trade_api.rest import REST
+import os
+
 from abc import ABC, abstractmethod
 
 class BaseDataFetcher(ABC):
@@ -20,6 +24,7 @@ class BaseDataFetcher(ABC):
     @abstractmethod
     def get_markets(self):
         pass
+
     @abstractmethod
     def get_symbols(self):
         pass
@@ -123,13 +128,19 @@ class CryptoDataFetcher(BaseDataFetcher):
             self.save_to_file(df, filename)
             return df
         
-class AlpacaDataFetcher(BaseDataFetcher):
-    def __init__(self):
-        with open('api_keys.json', 'r') as file:
-            api_keys = json.load(file)
-            self.alpaca_client = StockHistoricalDataClient(api_key=api_keys['alpaca_key'], secret_key=api_keys['alpaca_secret'])
-            self.alpaca_rest = REST(api_keys['alpaca_key'], api_keys['alpaca_secret']) 
 
+
+class AlpacaDataFetcher(BaseDataFetcher):
+    def __init__(self, api_key=None, secret_key=None):
+        self.api_key = api_key or os.getenv('ALPACA_API_KEY')
+        self.secret_key = secret_key or os.getenv('ALPACA_SECRET_KEY')
+
+        if not self.api_key or not self.secret_key:
+            raise ValueError('API key and secret key must be provided either as arguments or as environment variables.')
+
+        self.alpaca_client = StockHistoricalDataClient(api_key=self.api_key, secret_key=self.secret_key)
+        self.alpaca_rest = REST(self.api_key, self.secret_key) 
+        
     def get_symbols(self):
         assets =  self.alpaca_rest.list_assets()
         return [asset.symbol for asset in assets]
@@ -186,15 +197,80 @@ class AlpacaDataFetcher(BaseDataFetcher):
             df = self.fetch_alpaca_data(market, since, until,step)
             df = self.transform_raw_data(df)
             df.rename(columns={'timestamp': "dt"}, inplace=True)
+            df['dt'] = pd.to_datetime(df['dt'], unit='ms')
             self.save_to_file(df, filename)
+            df.dro
             return df
-
-class DataFetcher:
-    def __init__(self,data_source='crypto') -> None:
-        if data_source=='crypto':
-            self.data_fetcher = CryptoDataFetcher()
-        elif data_source=='alpaca':
-            self.data_fetcher = AlpacaDataFetcher()
-        else:
-            raise Exception('data source not supported')
         
+class PolygonDataFetcher(BaseDataFetcher):
+    def __init__(self, api_key=None):
+        self.api_key = api_key or os.getenv('POLYGON_API_KEY')
+
+        if not self.api_key:
+            raise ValueError('API key must be provided either as arguments or as environment variables.')
+    def get_markets(self):
+        return super().get_markets()
+    
+    def get_symbols(self):
+        return super().get_symbols()
+
+    def get_data(self, ticker='AAPL', start_date=None, end_date=None, multiplier=1, timespan='hour', limit=50_000):
+        """
+        Fetches stock data for a given ticker within a date range from the Polygon API.
+
+        :param ticker: The stock ticker symbol.
+        :param start_date: The start date in 'YYYY-MM-DD' format.
+        :param end_date: The end date in 'YYYY-MM-DD' format.
+        :param multiplier: The size of the timespan multiplier (e.g., 1, 5, 15).
+        :param timespan: The timespan (e.g., 'minute', 'hour', 'day').
+        :param api_key: The API key for the Polygon API.
+        :param limit: The number of results to fetch per request. Default is 120.
+        :return: A DataFrame containing the aggregated stock data.
+        """
+        if not start_date:
+            start_date = '1971-01-01'
+        if not end_date:
+            end_date = (datetime.today() - timedelta(days=1)).strftime('%Y-%m-%d')
+
+        base_url = "https://api.polygon.io/v2/aggs/ticker"
+        url = f"{base_url}/{ticker}/range/{multiplier}/{timespan}/{start_date}/{end_date}?adjusted=true&sort=asc&limit={limit}&apiKey={self.api_key}"
+        filename = f'{start_date}_{end_date}_{ticker.replace("/","-")}_{multiplier}{timespan}.csv'
+        cached_df = self.check_cached_file(filename)
+
+        if cached_df is not None:
+            print(f'cached {filename}')
+            return cached_df
+        else:
+            df = pd.DataFrame()
+            while url:
+                print(url)
+                response = requests.get(url)
+                data = response.json()
+                
+                if data['status'] != 'OK':
+                    # Check for rate limit error
+                    if 'maximum requests per minute' in data.get('error', ''):
+                        print("Rate limit exceeded. Waiting for 60 seconds before retrying...")
+                        time.sleep(60)  # Wait for 60 seconds
+                        continue  # Retry the request
+                    else:
+                        print(f"Error: {data['status']} - {data.get('error', 'Unknown error')}")
+                        break
+
+
+                current_page = pd.DataFrame(data['results'])
+                df = pd.concat([df, current_page], ignore_index=True)
+
+                next_url = data.get('next_url', None)
+                if next_url:
+                    url = f"{next_url}&apiKey={self.api_key}"
+                else:
+                    url = None
+
+            df.rename(columns={'t': 'dt','c':'close','o':'open','h':'high','l':'low','v':'volume'}, inplace=True)
+            df = self.transform_raw_data(df)
+            df.drop(columns=['vw','n'], inplace=True)
+            df['dt'] = pd.to_datetime(df['dt'], unit='ms')
+            self.save_to_file(df, filename)
+
+            return df
