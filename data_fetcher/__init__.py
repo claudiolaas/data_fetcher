@@ -1,1 +1,1 @@
-from .data import DataFetcher, CryptoDataFetcher, AlpacaDataFetcher
+from .data import BaseDataFetcher, CryptoDataFetcher, AlpacaDataFetcher, PolygonDataFetcher
