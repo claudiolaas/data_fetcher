@@ -53,13 +53,13 @@ class BaseDataFetcher(ABC):
             Path("csvs/").mkdir()
         df.to_csv(my_file, index=False)
 
-    def check_cached_file(self, filename):
+    def check_cached_file(self, filename: str) -> Optional[pd.DataFrame]:
         my_file = Path("csvs/") / filename
         if my_file.is_file():
             return pd.read_csv(my_file)
         return None
     
-    def transform_raw_data(self, df):
+    def transform_raw_data(self, df: pd.DataFrame) -> pd.DataFrame:
         
         df["log_return"] = np.log(df["close"]).diff().fillna(0)
         df["asset_return"] = df["close"] / df["close"].shift()
@@ -71,11 +71,11 @@ class CryptoDataFetcher(BaseDataFetcher):
     def __init__(self):
         self.exchange = ccxt.binance()
 
-    def get_markets(self):
+    def get_markets(self) -> Dict:
         markets = self.exchange.load_markets()
         return markets  
     
-    def get_symbols(self):
+    def get_symbols(self) -> List[str]:
         markets = self.exchange.load_markets()
         return list(markets.keys())
     
@@ -98,7 +98,7 @@ class CryptoDataFetcher(BaseDataFetcher):
 
         return since, until
     
-    def fetch_exchange_data(self, market, timeframe, since, until):
+    def fetch_exchange_data(self, market: str, timeframe: str, since: int, until: int) -> List[List[Union[int, float]]]:
         all_orders = []
         while since < until:
             orders = self.exchange.fetchOHLCV(market, timeframe=timeframe, since=since)
@@ -113,7 +113,7 @@ class CryptoDataFetcher(BaseDataFetcher):
                 since += (1000 * 60 * 60 * 24)
         return all_orders
     
-    def get_data(self, start="earliest", end="latest", market="BTC/USDT", step="1h"):
+    def get_data(self, start: str = "earliest", end: str = "latest", market: str = "BTC/USDT", step: str = "1h") -> pd.DataFrame:
         since, until = self.handle_time_boundaries(start, end, market)
         since_str = self.exchange.iso8601(since)[:10]
         until_str = self.exchange.iso8601(until)[:10]
@@ -135,7 +135,7 @@ class CryptoDataFetcher(BaseDataFetcher):
 
 
 class AlpacaDataFetcher(BaseDataFetcher):
-    def __init__(self, api_key=None, secret_key=None):
+    def __init__(self, api_key: Optional[str] = None, secret_key: Optional[str] = None) -> None:
         self.api_key = api_key or os.getenv('ALPACA_API_KEY')
         self.secret_key = secret_key or os.getenv('ALPACA_SECRET_KEY')
 
@@ -145,11 +145,11 @@ class AlpacaDataFetcher(BaseDataFetcher):
         self.alpaca_client = StockHistoricalDataClient(api_key=self.api_key, secret_key=self.secret_key)
         self.alpaca_rest = REST(self.api_key, self.secret_key) 
         
-    def get_symbols(self):
+    def get_symbols(self) -> List[str]:
         assets =  self.alpaca_rest.list_assets()
         return [asset.symbol for asset in assets]
     
-    def get_markets(self):
+    def get_markets(self) -> List:
         return self.alpaca_rest.list_assets()
     
 
@@ -160,7 +160,7 @@ class AlpacaDataFetcher(BaseDataFetcher):
         until = latest if end == "latest" else datetime.strptime(end, '%Y-%m-%d')
         return since, until
     
-    def fetch_alpaca_data(self, symbol, since, until,step):
+    def fetch_alpaca_data(self, symbol: str, since: datetime, until: datetime, step: str) -> pd.DataFrame:
         step_dict = {
             '1m': TimeFrame.Minute,
             '1h': TimeFrame.Hour,
@@ -177,7 +177,7 @@ class AlpacaDataFetcher(BaseDataFetcher):
         bars = self.alpaca_client.get_stock_bars(request_params)
         return bars.df
 
-    def get_data(self, start="earliest", end="latest", market="BTC/USDT", step="1h"):
+    def get_data(self, start: str = "earliest", end: str = "latest", market: str = "BTC/USDT", step: str = "1h") -> pd.DataFrame:
         since, until = self.handle_time_boundaries(start, end)
         since_str = since.strftime("%Y-%m-%d")
         until_str = until.strftime("%Y-%m-%d")
@@ -197,18 +197,19 @@ class AlpacaDataFetcher(BaseDataFetcher):
             return df
         
 class PolygonDataFetcher(BaseDataFetcher):
-    def __init__(self, api_key=None):
+    def __init__(self, api_key: Optional[str] = None) -> None:
         self.api_key = api_key or os.getenv('POLYGON_API_KEY')
 
         if not self.api_key:
             raise ValueError('API key must be provided either as arguments or as environment variables.')
-    def get_markets(self):
+    def get_markets(self) -> List:
         return super().get_markets()
     
-    def get_symbols(self):
+    def get_symbols(self) -> List[str]:
         return super().get_symbols()
 
-    def get_data(self, ticker='AAPL', start_date=None, end_date=None, multiplier=1, timespan='hour', limit=50_000):
+    def get_data(self, ticker: str = 'AAPL', start_date: Optional[str] = None, end_date: Optional[str] = None, 
+                multiplier: int = 1, timespan: str = 'hour', limit: int = 50_000) -> pd.DataFrame:
         """
         Fetches stock data for a given ticker within a date range from the Polygon API.
 
