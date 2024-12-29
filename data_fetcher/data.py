@@ -15,25 +15,39 @@ import os
 
 from abc import ABC, abstractmethod
 
+from typing import Dict, List, Optional, Union
+import pandas as pd
+
 class BaseDataFetcher(ABC):
 
     @abstractmethod
-    def get_data(self):
+    def get_data(self) -> pd.DataFrame:
         pass
 
     @abstractmethod
-    def get_markets(self):
+    def get_markets(self) -> Dict:
         pass
 
     @abstractmethod
-    def get_symbols(self):
+    def get_symbols(self) -> List[str]:
         pass
 
     @abstractmethod
-    def transform_raw_data(self):
+    def transform_raw_data(self, df: pd.DataFrame) -> pd.DataFrame:
         pass
 
-    def save_to_file(self, df, filename):
+    def get_earliest(self, market: str) -> int:
+        """Get the earliest available timestamp for a given market"""
+        since = self.exchange.parse8601('2010-01-01' + "T00:00:00Z")
+        until = self.exchange.parse8601('2050-01-01' + "T00:00:00Z")
+        while since < until:
+            orders = self.exchange.fetchOHLCV(market, timeframe='1M', since=since)
+            if len(orders) > 0:
+                return orders[0][0]
+            since += (1000 * 60 * 60 * 24 * 30)  # shift forward 30 days
+        return until
+
+    def save_to_file(self, df: pd.DataFrame, filename: str) -> None:
         my_file = Path("csvs/") / filename
         if not Path("csvs/").is_dir():
             Path("csvs/").mkdir()
@@ -76,7 +90,7 @@ class CryptoDataFetcher(BaseDataFetcher):
             else:
                 since += (1000 * 60 * 60 * 24 * 30) # shift forward 30 days
 
-    def handle_time_boundaries(self, start, end, market):
+    def handle_time_boundaries(self, start: str, end: str, market: str) -> tuple[int, int]:
         earliest = self.get_earliest(market)
         today = datetime.today().strftime("%Y-%m-%d")
         latest = self.exchange.parse8601(today + "T00:00:00Z")
@@ -148,18 +162,8 @@ class AlpacaDataFetcher(BaseDataFetcher):
     def get_markets(self):
         return self.alpaca_rest.list_assets()
     
-    def get_earliest(self, market):
-        since = self.exchange.parse8601('2010-01-01' + "T00:00:00Z")
-        until = self.exchange.parse8601('2050-01-01' + "T00:00:00Z")
-        while since < until:
-            orders = self.exchange.fetchOHLCV(market, timeframe='1M', since=since)
-            if len(orders) > 0:
-                earliest = orders[0][0]
-                return earliest
-            else:
-                since += (1000 * 60 * 60 * 24 * 30)
 
-    def handle_time_boundaries(self, start, end):
+    def handle_time_boundaries(self, start: str, end: str) -> tuple[datetime, datetime]:
         earliest = datetime.strptime("1800-01-01", '%Y-%m-%d')
         latest = datetime.today() - timedelta(days=1)
         since = earliest if start == "earliest" else datetime.strptime(start, '%Y-%m-%d')
