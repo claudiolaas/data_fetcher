@@ -79,16 +79,6 @@ class CryptoDataFetcher(BaseDataFetcher):
         markets = self.exchange.load_markets()
         return list(markets.keys())
     
-    def get_earliest(self, market):
-        since = self.exchange.parse8601('2010-01-01' + "T00:00:00Z")
-        until = self.exchange.parse8601('2050-01-01' + "T00:00:00Z")
-        while since < until:
-            orders = self.exchange.fetchOHLCV(market, timeframe='1M', since=since)
-            if len(orders) > 0:
-                earliest = orders[0][0]
-                return earliest
-            else:
-                since += (1000 * 60 * 60 * 24 * 30) # shift forward 30 days
 
     def handle_time_boundaries(self, start: str, end: str, market: str) -> tuple[int, int]:
         earliest = self.get_earliest(market)
