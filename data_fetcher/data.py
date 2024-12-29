@@ -60,10 +60,10 @@ class BaseDataFetcher(ABC):
         return None
     
     def transform_raw_data(self, df: pd.DataFrame) -> pd.DataFrame:
-        
+        df = df.copy()  # Avoid chained assignment warning
         df["log_return"] = np.log(df["close"]).diff().fillna(0)
         df["asset_return"] = df["close"] / df["close"].shift()
-        df["asset_return"].fillna(1, inplace=True)
+        df["asset_return"] = df["asset_return"].fillna(1)
         return df
 
 
@@ -264,7 +264,10 @@ class PolygonDataFetcher(BaseDataFetcher):
 
             df.rename(columns={'t': 'dt','c':'close','o':'open','h':'high','l':'low','v':'volume'}, inplace=True)
             df = self.transform_raw_data(df)
-            df.drop(columns=['vw','n'], inplace=True)
+            # Only drop columns if they exist
+            columns_to_drop = [col for col in ['vw', 'n'] if col in df.columns]
+            if columns_to_drop:
+                df.drop(columns=columns_to_drop, inplace=True)
             df['dt'] = pd.to_datetime(df['dt'], unit='ms')
             self.save_to_file(df, filename)
 
