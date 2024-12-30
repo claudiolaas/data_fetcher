@@ -215,7 +215,11 @@ class AlpacaDataFetcher(BaseDataFetcher):
                     return pd.DataFrame()
                 
                 df = self.transform_raw_data(df)
-                df = df.reset_index().copy() #AI! this does not reset the index. afterwards we still have MultiIndex([('AAPL', '2024-12-28 00:00:00+00:00')],names=['symbol', 'timestamp'])
+                df = df.copy()
+                if isinstance(df.index, pd.MultiIndex):
+                    df = df.reset_index(level=list(range(df.index.nlevels)))
+                else:
+                    df = df.reset_index()
                 df.rename(columns={'timestamp': "dt"}, inplace=True)
                 df['dt'] = pd.to_datetime(df['dt'])
                 self.save_to_file(df, filename)
