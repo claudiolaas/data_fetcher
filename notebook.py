@@ -14,15 +14,15 @@ def main():
     load_dotenv()
     
     fetchers = [
-        # CryptoDataFetcher(),
-        # AlpacaDataFetcher(),
+        CryptoDataFetcher(),
+        AlpacaDataFetcher(),
         PolygonDataFetcher()
     ]
     
     for fetcher in fetchers:
         try:
             logging.info(f"Fetching markets using {fetcher.__class__.__name__}")
-            symbols = fetcher.get_symbols()
+            symbols = fetcher.get_ticker()
             if symbols:
                 logging.info(f"Fetched {len(symbols)} symbols. First 5: {list(symbols)[:5]}...")
             else:
