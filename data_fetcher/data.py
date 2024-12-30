@@ -10,7 +10,6 @@ from alpaca.data.historical import StockHistoricalDataClient
 from datetime import datetime, timedelta
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
-import json
 from alpaca_trade_api.rest import REST
 import os
 
@@ -30,7 +29,7 @@ class BaseDataFetcher(ABC):
         pass
 
     @abstractmethod
-    def get_symbols(self) -> List[str]:
+    def get_ticker(self) -> List[str]:
         pass
 
     @abstractmethod
@@ -76,7 +75,7 @@ class CryptoDataFetcher(BaseDataFetcher):
         markets = self.exchange.load_markets()
         return markets  
     
-    def get_symbols(self) -> List[str]:
+    def get_ticker(self) -> List[str]:
         markets = self.exchange.load_markets()
         return list(markets.keys())
     
@@ -114,18 +113,18 @@ class CryptoDataFetcher(BaseDataFetcher):
                 since += (1000 * 60 * 60 * 24)
         return all_orders
     
-    def get_data(self, start: str = "earliest", end: str = "latest", market: str = "BTC/USDT", step: str = "1h") -> pd.DataFrame:
-        since, until = self.handle_time_boundaries(start, end, market)
+    def get_data(self, start_date: str = "earliest", end_date: str = "latest", ticker: str = "BTC/USDT", step: str = "1h") -> pd.DataFrame:
+        since, until = self.handle_time_boundaries(start_date, end_date, ticker)
         since_str = self.exchange.iso8601(since)[:10]
         until_str = self.exchange.iso8601(until)[:10]
         
-        filename = f'{since_str}_{until_str}_{market.replace("/","-")}_{step}.csv'
+        filename = f'{since_str}_{until_str}_{ticker.replace("/","-")}_{step}.csv'
         cached_df = self.check_cached_file(filename)
         if cached_df is not None:
             print(f'cached {filename}')
             return cached_df
         else:
-            df_list = self.fetch_exchange_data(market, step, since, until)
+            df_list = self.fetch_exchange_data(ticker, step, since, until)
             df = pd.DataFrame(df_list).reset_index()
             df.rename(columns={0: "milliseconds", 1: "open", 2: "high", 3: "low", 4: "close", 5: "volume"}, inplace=True)
             df["dt"] = df["milliseconds"].apply(lambda x: self.exchange.iso8601(x))
@@ -144,7 +143,7 @@ class AlpacaDataFetcher(BaseDataFetcher):
         self.alpaca_client = StockHistoricalDataClient(api_key=self.api_key, secret_key=self.secret_key)
         self.alpaca_rest = REST(self.api_key, self.secret_key) 
         
-    def get_symbols(self) -> List[str]:
+    def get_ticker(self) -> List[str]:
         assets =  self.alpaca_rest.list_assets()
         return [asset.symbol for asset in assets]
     
@@ -176,18 +175,18 @@ class AlpacaDataFetcher(BaseDataFetcher):
         bars = self.alpaca_client.get_stock_bars(request_params)
         return bars.df
 
-    def get_data(self, start: str = "earliest", end: str = "latest", market: str = "BTC/USDT", step: str = "1h") -> pd.DataFrame:
-        since, until = self.handle_time_boundaries(start, end)
+    def get_data(self, start_date: str = "earliest", end_date: str = "latest", ticker: str = "BTC/USDT", step: str = "1h") -> pd.DataFrame:
+        since, until = self.handle_time_boundaries(start_date, end_date)
         since_str = since.strftime("%Y-%m-%d")
         until_str = until.strftime("%Y-%m-%d")
         
-        filename = f'{since_str}_{until_str}_{market.replace("/","-")}_{step}.csv'
+        filename = f'{since_str}_{until_str}_{ticker.replace("/","-")}_{step}.csv'
         cached_df = self.check_cached_file(filename)
         if cached_df is not None:
             print(f'cached {filename}')
             return cached_df
         else:
-            df = self.fetch_alpaca_data(market, since, until,step)
+            df = self.fetch_alpaca_data(ticker, since, until,step)
             df = self.transform_raw_data(df)
             df.rename(columns={'timestamp': "dt"}, inplace=True)
             df['dt'] = pd.to_datetime(df['dt'], unit='ms')
@@ -204,7 +203,7 @@ class PolygonDataFetcher(BaseDataFetcher):
     def get_markets(self) -> List:
         return super().get_markets()
     
-    def get_symbols(self) -> List[str]:
+    def get_ticker(self) -> List[str]:
         """Fetch active stock tickers from Polygon API"""
         url = f"https://api.polygon.io/v3/reference/tickers?market=stocks&active=true&limit=1000&apiKey={self.api_key}"
         symbols = []
