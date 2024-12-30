@@ -14,17 +14,17 @@ def main():
     load_dotenv()
     
     fetchers = [
-        CryptoDataFetcher(),
-        AlpacaDataFetcher(),
+        # CryptoDataFetcher(),
+        # AlpacaDataFetcher(),
         PolygonDataFetcher()
     ]
     
     for fetcher in fetchers:
         try:
             logging.info(f"Fetching markets using {fetcher.__class__.__name__}")
-            markets = fetcher.get_markets()
-            if markets:
-                logging.info(f"Markets fetched successfully: {list(markets.keys())[:5]}...")  # Show first 5 keys
+            symbols = fetcher.get_symbols()
+            if symbols:
+                logging.info(f"Markets fetched successfully: {list(symbols)[:5]}...")  # Show first 5 keys
             else:
                 logging.warning("No markets returned")
         except Exception as e:
@@ -33,3 +33,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+x
