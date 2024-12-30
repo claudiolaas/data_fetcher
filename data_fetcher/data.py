@@ -204,7 +204,31 @@ class PolygonDataFetcher(BaseDataFetcher):
         return super().get_markets()
     
     def get_symbols(self) -> List[str]:
-        return super().get_symbols()
+        """Fetch active stock tickers from Polygon API"""
+        url = f"https://api.polygon.io/v3/reference/tickers?market=stocks&active=true&limit=1000&apiKey={self.api_key}"
+        symbols = []
+        
+        while url:
+            try:
+                response = requests.get(url)
+                data = response.json()
+                
+                if data.get('status') != 'OK':
+                    raise ValueError(f"Polygon API error: {data.get('error', 'Unknown error')}")
+                
+                # Extract symbols from results
+                symbols.extend([ticker['ticker'] for ticker in data['results']])
+                
+                # Check for next page
+                url = data.get('next_url')
+                if url:
+                    url = f"{url}&apiKey={self.api_key}"
+                    
+            except Exception as e:
+                logging.error(f"Error fetching symbols from Polygon: {str(e)}")
+                break
+                
+        return symbols
 
     def get_data(self, ticker: str = 'AAPL', start_date: Optional[str] = None, end_date: Optional[str] = None, 
                 multiplier: int = 1, timespan: str = 'hour', limit: int = 50_000) -> pd.DataFrame:
