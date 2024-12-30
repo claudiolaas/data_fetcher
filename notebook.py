@@ -24,7 +24,7 @@ def main():
             logging.info(f"Fetching markets using {fetcher.__class__.__name__}")
             symbols = fetcher.get_symbols()
             if symbols:
-                logging.info(f"Markets fetched successfully: {list(symbols)[:5]}...")  # Show first 5 keys
+                logging.info(f"Fetched {len(symbols)} symbols. First 5: {list(symbols)[:5]}...")
             else:
                 logging.warning("No markets returned")
         except Exception as e:
