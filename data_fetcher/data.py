@@ -166,33 +166,62 @@ class AlpacaDataFetcher(BaseDataFetcher):
             '1w': TimeFrame.Week,
             '1M': TimeFrame.Month
         }
-        request_params = StockBarsRequest(
-            symbol_or_symbols=[symbol],
-            timeframe=step_dict[step],  
-            start=since,
-            end=until
-        )
-        bars = self.alpaca_client.get_stock_bars(request_params)
-        return bars.df
+        
+        try:
+            request_params = StockBarsRequest(
+                symbol_or_symbols=[symbol],
+                timeframe=step_dict[step],
+                start=since,
+                end=until,
+                limit=10000  # Max allowed by Alpaca
+            )
+            
+            bars = self.alpaca_client.get_stock_bars(request_params)
+            if not bars:
+                logging.warning(f"No bars returned for {symbol}")
+                return pd.DataFrame()
+                
+            df = bars.df
+            if df.empty:
+                logging.warning(f"Empty DataFrame returned for {symbol}")
+                
+            return df
+            
+        except Exception as e:
+            logging.error(f"Error fetching data for {symbol}: {str(e)}")
+            return pd.DataFrame()
 
-    def get_data(self, start_date: str = "earliest", end_date: str = "latest", ticker: str = "BTC/USDT", step: str = "1h") -> pd.DataFrame:
+    def get_data(self, start_date: str = "earliest", end_date: str = "latest", ticker: str = "AAPL", step: str = "1h") -> pd.DataFrame:
         since, until = self.handle_time_boundaries(start_date, end_date)
         since_str = since.strftime("%Y-%m-%d")
         until_str = until.strftime("%Y-%m-%d")
         
+        # Ensure we're not requesting future dates
+        today = datetime.today().date()
+        if until.date() > today:
+            until = datetime.combine(today, datetime.min.time())
+            logging.warning(f"Adjusted end_date to today ({today}) as future dates are not available")
+        
         filename = f'{since_str}_{until_str}_{ticker.replace("/","-")}_{step}.csv'
         cached_df = self.check_cached_file(filename)
         if cached_df is not None:
-            print(f'cached {filename}')
+            logging.info(f'Using cached data from {filename}')
             return cached_df
         else:
-            df = self.fetch_alpaca_data(ticker, since, until,step)
-            df = self.transform_raw_data(df)
-            df.rename(columns={'timestamp': "dt"}, inplace=True)
-            df['dt'] = pd.to_datetime(df['dt'], unit='ms')
-            self.save_to_file(df, filename)
-            df.dro
-            return df
+            try:
+                df = self.fetch_alpaca_data(ticker, since, until, step)
+                if df.empty:
+                    logging.warning(f"No data found for {ticker} between {since_str} and {until_str}")
+                    return pd.DataFrame()
+                
+                df = self.transform_raw_data(df)
+                df.rename(columns={'timestamp': "dt"}, inplace=True)
+                df['dt'] = pd.to_datetime(df['dt'])
+                self.save_to_file(df, filename)
+                return df
+            except Exception as e:
+                logging.error(f"Error fetching data for {ticker}: {str(e)}")
+                return pd.DataFrame()
         
 class PolygonDataFetcher(BaseDataFetcher):
     def __init__(self, api_key: Optional[str] = None) -> None:
