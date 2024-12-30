@@ -132,8 +132,6 @@ class CryptoDataFetcher(BaseDataFetcher):
             self.save_to_file(df, filename)
             return df
         
-
-
 class AlpacaDataFetcher(BaseDataFetcher):
     def __init__(self, api_key: Optional[str] = None, secret_key: Optional[str] = None) -> None:
         self.api_key = api_key or os.getenv('ALPACA_API_KEY')
