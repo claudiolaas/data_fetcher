@@ -1,6 +1,7 @@
 import time
 import requests
 import ccxt
+import logging
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
