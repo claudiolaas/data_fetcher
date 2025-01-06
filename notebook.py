@@ -53,5 +53,67 @@ if __name__ == "__main__":
     main()
 
 # %%
+import os
+import pandas as pd
+import plotly.graph_objects as go
+from glob import glob
 
-# Add a script that loops over the csvs dir, reads the csv files, appends the column log_return with .cumsum() to a new dataframe and plots the reuslt using plotly  AI!
+def plot_cumulative_returns():
+    # Get all CSV files in the csvs directory
+    csv_files = glob('csvs/*.csv')
+    
+    if not csv_files:
+        logging.warning("No CSV files found in csvs directory")
+        return
+        
+    # Create empty DataFrame to store results
+    combined_returns = pd.DataFrame()
+    
+    # Process each CSV file
+    for file in csv_files:
+        try:
+            # Extract symbol name from filename
+            symbol = os.path.splitext(os.path.basename(file))[0]
+            
+            # Read CSV file
+            df = pd.read_csv(file)
+            
+            # Calculate log returns
+            df['log_return'] = np.log(df['close'] / df['close'].shift(1))
+            
+            # Calculate cumulative returns
+            cum_returns = df['log_return'].cumsum()
+            
+            # Add to combined DataFrame
+            combined_returns[symbol] = cum_returns
+            
+            logging.info(f"Processed {symbol}")
+        except Exception as e:
+            logging.error(f"Error processing {file}: {str(e)}")
+    
+    # Create Plotly figure
+    fig = go.Figure()
+    
+    # Add traces for each symbol
+    for column in combined_returns.columns:
+        fig.add_trace(
+            go.Scatter(
+                y=combined_returns[column],
+                name=column,
+                mode='lines'
+            )
+        )
+    
+    # Update layout
+    fig.update_layout(
+        title='Cumulative Log Returns by Symbol',
+        yaxis_title='Cumulative Log Return',
+        xaxis_title='Time Period',
+        showlegend=True
+    )
+    
+    # Show the plot
+    fig.show()
+
+# Run the plotting function
+plot_cumulative_returns()
