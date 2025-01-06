@@ -11,6 +11,7 @@ setup(
         'alpaca-trade-api',
         'alpaca-py',
         'python-dateutil',
+        'tenacity',
     ],
     python_requires='>=3.6',
     entry_points={

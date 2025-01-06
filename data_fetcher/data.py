@@ -2,6 +2,7 @@ import time
 import requests
 import ccxt
 import logging
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
@@ -250,6 +251,28 @@ class PolygonDataFetcher(BaseDataFetcher):
     def get_markets(self) -> List:
         return super().get_markets()
     
+    class PolygonRateLimitError(Exception):
+        """Custom exception for Polygon API rate limits"""
+        pass
+
+    @retry(
+        retry=retry_if_exception_type(PolygonRateLimitError),
+        wait=wait_exponential(multiplier=1, min=4, max=60),
+        stop=stop_after_attempt(5)
+    )
+    def _make_polygon_request(self, url: str) -> dict:
+        """Make a request to Polygon API with retry logic"""
+        response = requests.get(url)
+        data = response.json()
+        
+        if data.get('status') != 'OK':
+            error_msg = data.get('error', 'Unknown error')
+            if 'maximum requests per minute' in error_msg:
+                raise self.PolygonRateLimitError(f"Rate limit exceeded: {error_msg}")
+            raise ValueError(f"Polygon API error: {error_msg}")
+            
+        return data
+
     def get_ticker(self) -> List[str]:
         """Fetch active stock tickers from Polygon API"""
         url = f"https://api.polygon.io/v3/reference/tickers?market=stocks&active=true&limit=1000&apiKey={self.api_key}"
@@ -257,13 +280,7 @@ class PolygonDataFetcher(BaseDataFetcher):
         
         while url:
             try:
-                response = requests.get(url)
-                data = response.json()
-                
-                if data.get('status') != 'OK':
-                    raise ValueError(f"Polygon API error: {data.get('error', 'Unknown error')}")
-                
-                # Extract symbols from results
+                data = self._make_polygon_request(url)
                 symbols.extend([ticker['ticker'] for ticker in data['results']])
                 
                 # Check for next page
@@ -337,19 +354,8 @@ class PolygonDataFetcher(BaseDataFetcher):
         else:
             df = pd.DataFrame()
             while url:
-                print(url)
-                response = requests.get(url)
-                data = response.json()
-                
-                if data['status'] != 'OK':
-                    # Check for rate limit error
-                    if 'maximum requests per minute' in data.get('error', ''):
-                        print("Rate limit exceeded. Waiting for 60 seconds before retrying...")
-                        time.sleep(60)  # Wait for 60 seconds
-                        continue  # Retry the request
-                    else:
-                        print(f"Error: {data['status']} - {data.get('error', 'Unknown error')}")
-                        break
+                try:
+                    data = self._make_polygon_request(url)
 
 
                 current_page = pd.DataFrame(data['results'])
