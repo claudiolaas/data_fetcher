@@ -1,3 +1,4 @@
+#%%
 from data_fetcher import CryptoDataFetcher, AlpacaDataFetcher, PolygonDataFetcher
 from dotenv import load_dotenv
 import logging
@@ -14,9 +15,9 @@ def main():
     load_dotenv()
     
     fetchers = [
-        CryptoDataFetcher(),
+        # CryptoDataFetcher(),
         AlpacaDataFetcher(),
-        PolygonDataFetcher()
+        # PolygonDataFetcher()
     ]
     
     for fetcher in fetchers:
@@ -27,11 +28,11 @@ def main():
                 logging.info(f"Fetched {len(symbols)} symbols. First 5: {list(symbols)[:5]}...")
                 
                 # Fetch hourly data for first symbol on Dec 29, 2024
-                first_symbol = list(symbols)[0]
+                first_symbol = 'AAPL'#list(symbols)[0]
                 try:
                     logging.info(f"Fetching hourly data for {first_symbol} on 2024-12-29")
                     data = fetcher.get_data(
-                        start_date="2024-12-29",
+                        start_date="2023-12-28",
                         end_date="2024-12-29",
                         ticker=first_symbol,
                         step="1h"

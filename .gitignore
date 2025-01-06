@@ -7,3 +7,4 @@ data_fetcher/__pycache__/__init__.cpython-311.pyc
 data_fetcher/__pycache__/data.cpython-311.pyc
 api_keys.json
 .aider*
+.env
