@@ -356,16 +356,17 @@ class PolygonDataFetcher(BaseDataFetcher):
             while url:
                 try:
                     data = self._make_polygon_request(url)
+                    current_page = pd.DataFrame(data['results'])
+                    df = pd.concat([df, current_page], ignore_index=True)
 
-
-                current_page = pd.DataFrame(data['results'])
-                df = pd.concat([df, current_page], ignore_index=True)
-
-                next_url = data.get('next_url', None)
-                if next_url:
-                    url = f"{next_url}&apiKey={self.api_key}"
-                else:
-                    url = None
+                    next_url = data.get('next_url', None)
+                    if next_url:
+                        url = f"{next_url}&apiKey={self.api_key}"
+                    else:
+                        url = None
+                except Exception as e:
+                    logging.error(f"Error fetching data from Polygon: {str(e)}")
+                    break
 
             df.rename(columns={'t': 'dt','c':'close','o':'open','h':'high','l':'low','v':'volume'}, inplace=True)
             df = self.transform_raw_data(df)
