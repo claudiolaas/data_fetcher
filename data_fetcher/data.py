@@ -230,6 +230,20 @@ class PolygonDataFetcher(BaseDataFetcher):
 
         if not self.api_key:
             raise ValueError('API key must be provided either as arguments or as environment variables.')
+        
+        # Mapping from step format to (multiplier, timespan)
+        self.step_mapping = {
+            '1m': (1, 'minute'),
+            '5m': (5, 'minute'),
+            '15m': (15, 'minute'),
+            '30m': (30, 'minute'),
+            '1h': (1, 'hour'),
+            '2h': (2, 'hour'),
+            '4h': (4, 'hour'),
+            '1d': (1, 'day'),
+            '1w': (1, 'week'),
+            '1M': (1, 'month')
+        }
     def get_markets(self) -> List:
         return super().get_markets()
     
@@ -260,8 +274,14 @@ class PolygonDataFetcher(BaseDataFetcher):
                 
         return symbols
 
+    def _parse_step(self, step: str) -> tuple[int, str]:
+        """Convert step string to multiplier and timespan"""
+        if step not in self.step_mapping:
+            raise ValueError(f"Unsupported step value: {step}. Supported values are: {list(self.step_mapping.keys())}")
+        return self.step_mapping[step]
+
     def get_data(self, ticker: str = 'AAPL', start_date: Optional[str] = None, end_date: Optional[str] = None, 
-                multiplier: int = 1, timespan: str = 'hour', limit: int = 50_000) -> pd.DataFrame:
+                step: str = '1h', limit: int = 50_000) -> pd.DataFrame:
         """
         Fetches stock data for a given ticker within a date range from the Polygon API.
 
@@ -280,8 +300,9 @@ class PolygonDataFetcher(BaseDataFetcher):
             end_date = (datetime.today() - timedelta(days=1)).strftime('%Y-%m-%d')
 
         base_url = "https://api.polygon.io/v2/aggs/ticker"
+        multiplier, timespan = self._parse_step(step)
         url = f"{base_url}/{ticker}/range/{multiplier}/{timespan}/{start_date}/{end_date}?adjusted=true&sort=asc&limit={limit}&apiKey={self.api_key}"
-        filename = f'{start_date}_{end_date}_{ticker.replace("/","-")}_{multiplier}{timespan}.csv'
+        filename = f'{start_date}_{end_date}_{ticker.replace("/","-")}_{step}.csv'
         cached_df = self.check_cached_file(filename)
 
         if cached_df is not None:
