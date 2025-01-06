@@ -260,7 +260,8 @@ class PolygonDataFetcher(BaseDataFetcher):
         wait=wait_exponential(multiplier=1, min=4, max=60),
         stop=stop_after_attempt(5),
         after=lambda retry_state: logging.warning(
-            f"Retry attempt {retry_state.attempt_number} for Polygon API request after {retry_state.outcome.exception()}"
+            f"Retry attempt {retry_state.attempt_number} for Polygon API request after {retry_state.outcome.exception()}. "
+            f"Waiting {retry_state.next_action.sleep} seconds before next attempt"
         )
     )
     def _make_polygon_request(self, url: str) -> dict:
