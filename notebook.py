@@ -15,9 +15,9 @@ def main():
     load_dotenv()
     
     fetchers = [
-        # CryptoDataFetcher(),
+        CryptoDataFetcher(),
         # AlpacaDataFetcher(),
-        PolygonDataFetcher()
+        # PolygonDataFetcher()
     ]
     
     for fetcher in fetchers:
@@ -30,6 +30,7 @@ def main():
                 # Fetch hourly data for first symbol on Dec 29, 2024
                 # first_symbol = list(symbols)[0]
                 first_three = list(symbols)[::200]
+                print(len(first_three))
 
                 for sym in first_three:
                     try:
@@ -38,7 +39,7 @@ def main():
                             # start_date="2023-12-28",
                             # end_date="2024-12-29",
                             ticker=sym,
-                            step="1h"
+                            step="1d"
                         )
                         logging.info(f"Data fetched:\n{data.head()}")
                     except Exception as e:
@@ -57,7 +58,8 @@ import os
 import pandas as pd
 import plotly.graph_objects as go
 from glob import glob
-
+import plotly.io as pio                                                                                                                                                                                                                                                                                                                                
+pio.renderers.default = "browser"  
 def plot_cumulative_returns():
     # Get all CSV files in the csvs directory
     csv_files = glob('csvs/*.csv')
@@ -78,11 +80,9 @@ def plot_cumulative_returns():
             # Read CSV file
             df = pd.read_csv(file)
             
-            # Calculate log returns
-            df['log_return'] = np.log(df['close'] / df['close'].shift(1))
             
             # Calculate cumulative returns
-            cum_returns = df['log_return'].cumsum()
+            cum_returns = df['asset_return'].cumprod()
             
             # Add to combined DataFrame
             combined_returns[symbol] = cum_returns
@@ -117,3 +117,5 @@ def plot_cumulative_returns():
 
 # Run the plotting function
 plot_cumulative_returns()
+
+# %%
