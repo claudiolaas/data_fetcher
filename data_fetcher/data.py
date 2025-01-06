@@ -258,7 +258,10 @@ class PolygonDataFetcher(BaseDataFetcher):
     @retry(
         retry=retry_if_exception_type(PolygonRateLimitError),
         wait=wait_exponential(multiplier=1, min=4, max=60),
-        stop=stop_after_attempt(5)
+        stop=stop_after_attempt(5),
+        after=lambda retry_state: logging.warning(
+            f"Retry attempt {retry_state.attempt_number} for Polygon API request after {retry_state.outcome.exception()}"
+        )
     )
     def _make_polygon_request(self, url: str) -> dict:
         """Make a request to Polygon API with retry logic"""
