@@ -7,3 +7,5 @@ python-dateutil
 pytest
 pytest-mock
 requests
+tenacity
+plotly
