@@ -231,18 +231,21 @@ class PolygonDataFetcher(BaseDataFetcher):
         if not self.api_key:
             raise ValueError('API key must be provided either as arguments or as environment variables.')
         
-        # Mapping from step format to (multiplier, timespan)
-        self.step_mapping = {
-            '1m': (1, 'minute'),
-            '5m': (5, 'minute'),
-            '15m': (15, 'minute'),
-            '30m': (30, 'minute'),
-            '1h': (1, 'hour'),
-            '2h': (2, 'hour'),
-            '4h': (4, 'hour'),
-            '1d': (1, 'day'),
-            '1w': (1, 'week'),
-            '1M': (1, 'month')
+        # Separate mappings for timespan units and valid multipliers
+        self.timespan_mapping = {
+            'm': 'minute',
+            'h': 'hour',
+            'd': 'day',
+            'w': 'week',
+            'M': 'month'
+        }
+        
+        self.valid_multipliers = {
+            'minute': [1, 5, 15, 30],
+            'hour': [1, 2, 4],
+            'day': [1],
+            'week': [1],
+            'month': [1]
         }
     def get_markets(self) -> List:
         return super().get_markets()
@@ -275,10 +278,33 @@ class PolygonDataFetcher(BaseDataFetcher):
         return symbols
 
     def _parse_step(self, step: str) -> tuple[int, str]:
-        """Convert step string to multiplier and timespan"""
-        if step not in self.step_mapping:
-            raise ValueError(f"Unsupported step value: {step}. Supported values are: {list(self.step_mapping.keys())}")
-        return self.step_mapping[step]
+        """
+        Convert step string to multiplier and timespan
+        Example: '15m' -> (15, 'minute'), '2h' -> (2, 'hour')
+        """
+        import re
+        
+        # Extract multiplier and unit from step string
+        match = re.match(r'(\d+)([mhdwM])', step)
+        if not match:
+            raise ValueError(f"Invalid step format: {step}. Example format: '15m', '2h', '1d'")
+            
+        multiplier = int(match.group(1))
+        unit = match.group(2)
+        
+        if unit not in self.timespan_mapping:
+            raise ValueError(f"Unsupported time unit: {unit}. Supported units are: {list(self.timespan_mapping.keys())}")
+            
+        timespan = self.timespan_mapping[unit]
+        
+        # Validate multiplier for the given timespan
+        if multiplier not in self.valid_multipliers[timespan]:
+            raise ValueError(
+                f"Invalid multiplier {multiplier} for {timespan}. "
+                f"Valid multipliers are: {self.valid_multipliers[timespan]}"
+            )
+            
+        return multiplier, timespan
 
     def get_data(self, ticker: str = 'AAPL', start_date: Optional[str] = None, end_date: Optional[str] = None, 
                 step: str = '1h', limit: int = 50_000) -> pd.DataFrame:
