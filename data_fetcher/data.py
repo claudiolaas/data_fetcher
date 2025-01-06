@@ -119,7 +119,7 @@ class CryptoDataFetcher(BaseDataFetcher):
         since_str = self.exchange.iso8601(since)[:10]
         until_str = self.exchange.iso8601(until)[:10]
         
-        filename = f'{since_str}_{until_str}_{ticker.replace("/","-")}_{step}.csv'
+        filename = f'{ticker.replace("/","-")}_{step}_{since_str}_{until_str}.csv'
         cached_df = self.check_cached_file(filename)
         if cached_df is not None:
             print(f'cached {filename}')
@@ -203,7 +203,7 @@ class AlpacaDataFetcher(BaseDataFetcher):
             until = datetime.combine(today, datetime.min.time())
             logging.warning(f"Adjusted end_date to today ({today}) as future dates are not available")
         
-        filename = f'{since_str}_{until_str}_{ticker.replace("/","-")}_{step}.csv'
+        filename = f'{ticker.replace("/","-")}_{step}_{since_str}_{until_str}.csv'
         cached_df = self.check_cached_file(filename)
         if cached_df is not None:
             logging.info(f'Using cached data from {filename}')
@@ -349,7 +349,7 @@ class PolygonDataFetcher(BaseDataFetcher):
         base_url = "https://api.polygon.io/v2/aggs/ticker"
         multiplier, timespan = self._parse_step(step)
         url = f"{base_url}/{ticker}/range/{multiplier}/{timespan}/{start_date}/{end_date}?adjusted=true&sort=asc&limit={limit}&apiKey={self.api_key}"
-        filename = f'{start_date}_{end_date}_{ticker.replace("/","-")}_{step}.csv'
+        filename = f'{ticker.replace("/","-")}_{step}_{start_date}_{end_date}.csv'
         cached_df = self.check_cached_file(filename)
 
         if cached_df is not None:

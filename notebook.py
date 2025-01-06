@@ -15,8 +15,8 @@ def main():
     load_dotenv()
     
     fetchers = [
-        CryptoDataFetcher(),
-        # AlpacaDataFetcher(),
+        # CryptoDataFetcher(),
+        AlpacaDataFetcher(),
         # PolygonDataFetcher()
     ]
     
