@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='data_fetcher',
-    version='0.1.7',
+    version='0.1.9',
     description='A Python package for fetching financial data from various sources',
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',
