@@ -2,6 +2,16 @@
 
 A Python package for fetching financial data from various sources including crypto exchanges, Alpaca, and Polygon.
 
+## Installation and Usage
+1. copy and rename .env.sample to .env
+2. populate the variables with your keys
+3. run
+
+```
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
 ## Publishing to PyPI
 
 Follow these steps to publish a new version to PyPI:
@@ -49,15 +59,4 @@ python -m twine upload dist/*
 
 You'll need PyPI credentials to upload. You can store them in `~/.pypirc` or enter them when prompted.
 
-## Development
 
-1. Clone the repository
-2. Create a virtual environment
-3. Install development dependencies:
-```bash
-pip install -e ".[dev]"
-```
-
-## License
-
-MIT
