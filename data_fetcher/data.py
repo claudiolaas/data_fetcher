@@ -113,7 +113,7 @@ class CryptoDataFetcher(BaseDataFetcher):
                 since += (1000 * 60 * 60 * 24)
         return all_orders
     
-    def get_data(self, start_date: str = "earliest", end_date: str = "latest", ticker: str = "BTC/USDT", step: str = "1h") -> pd.DataFrame:
+    def get_data(self,ticker: str = "BTC/USDT", start_date: str = "earliest", end_date: str = "latest",  step: str = "1h") -> pd.DataFrame:
         since, until = self.handle_time_boundaries(start_date, end_date, ticker)
         since_str = self.exchange.iso8601(since)[:10]
         until_str = self.exchange.iso8601(until)[:10]
@@ -191,7 +191,7 @@ class AlpacaDataFetcher(BaseDataFetcher):
             logging.error(f"Error fetching data for {symbol}: {str(e)}")
             return pd.DataFrame()
 
-    def get_data(self, start_date: str = "earliest", end_date: str = "latest", ticker: str = "AAPL", step: str = "1h") -> pd.DataFrame:
+    def get_data(self, ticker: str = "AAPL", start_date: str = "earliest", end_date: str = "latest", step: str = "1h") -> pd.DataFrame:
         since, until = self.handle_time_boundaries(start_date, end_date)
         since_str = since.strftime("%Y-%m-%d")
         until_str = until.strftime("%Y-%m-%d")
