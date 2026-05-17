@@ -18,14 +18,18 @@ From a local checkout:
 git clone https://github.com/claudiolaas/data_fetcher.git
 cd data_fetcher
 uv venv
-uv pip install -e ".[crypto,dev]"
+uv sync --extra crypto --extra dev
 ```
 
 For optional provider dependencies:
 
 ```bash
-uv pip install -e ".[alpaca,polygon]"
+uv sync --extra alpaca --extra polygon --extra dev
 ```
+
+Use `uv sync --extra ...` when running commands through `uv run`; it installs
+dependencies into this project's `.venv`. `uv pip install ...` can target an
+already-active external virtualenv unless `--active` is used.
 
 Useful extras:
 
@@ -110,9 +114,10 @@ uv run data-fetcher alpaca symbols --limit 0
 Alpaca commands require optional dependencies and credentials:
 
 ```bash
-uv pip install -e ".[alpaca]"
+uv sync --extra alpaca --extra dev
 export ALPACA_API_KEY=...
 export ALPACA_SECRET_KEY=...
+uv run data-fetcher alpaca symbols --limit 0
 ```
 
 ### Fetch OHLCV

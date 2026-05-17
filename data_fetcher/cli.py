@@ -305,9 +305,6 @@ def alpaca_symbols(
     """
     try:
         from data_fetcher.data import AlpacaDataFetcher
-
-        fetcher = AlpacaDataFetcher()
-        results = list(fetcher.get_ticker())
     except ImportError as e:
         typer.echo(
             "Alpaca dependencies are not installed. Install with: "
@@ -315,6 +312,10 @@ def alpaca_symbols(
             err=True,
         )
         raise typer.Exit(code=1) from e
+
+    try:
+        fetcher = AlpacaDataFetcher()
+        results = list(fetcher.get_ticker())
     except Exception as e:
         typer.echo(f"Error loading Alpaca symbols: {e}", err=True)
         raise typer.Exit(code=1) from e
