@@ -20,6 +20,8 @@ app = typer.Typer(
     name="data-fetcher",
     help="Fetch and manage historical OHLCV data for crypto and other markets.",
 )
+crypto_app = typer.Typer(help="Crypto OHLCV commands backed by CCXT.")
+alpaca_app = typer.Typer(help="Alpaca market data commands.")
 
 EXCHANGE_LABELS = {
     "binance": "Binance",
@@ -289,6 +291,59 @@ def validate(
             f"{r.non_positive_price_count:<10} {r.non_positive_volume_count:<8} "
             f"{r.gap_count:<6} {r.largest_gap_bars:<8} {r.status:<8}"
         )
+
+
+@alpaca_app.command("symbols")
+def alpaca_symbols(
+    contains: Optional[str] = typer.Option(None, "--contains", help="Filter symbol containing text"),
+    limit: int = typer.Option(200, "--limit", "-n", help="Maximum number of symbols to show, 0 for all"),
+) -> None:
+    """List Alpaca asset symbols.
+
+    Requires the optional Alpaca dependencies and ALPACA_API_KEY /
+    ALPACA_SECRET_KEY credentials.
+    """
+    try:
+        from data_fetcher.data import AlpacaDataFetcher
+
+        fetcher = AlpacaDataFetcher()
+        results = list(fetcher.get_ticker())
+    except ImportError as e:
+        typer.echo(
+            "Alpaca dependencies are not installed. Install with: "
+            'uv pip install -e ".[alpaca]"',
+            err=True,
+        )
+        raise typer.Exit(code=1) from e
+    except Exception as e:
+        typer.echo(f"Error loading Alpaca symbols: {e}", err=True)
+        raise typer.Exit(code=1) from e
+
+    if contains:
+        results = [symbol for symbol in results if contains.upper() in symbol.upper()]
+    results = sorted(results)
+    if limit > 0:
+        results = results[:limit]
+
+    if not results:
+        typer.echo("No Alpaca symbols found matching the given filters.")
+        raise typer.Exit(code=0)
+
+    print(f"{'symbol':<20}")
+    print("-" * 20)
+    for symbol in results:
+        print(f"{symbol:<20}")
+
+
+# Provider-scoped aliases. The root commands remain for backwards
+# compatibility with the initial crypto-only CLI.
+crypto_app.command("exchanges")(exchanges)
+crypto_app.command("symbols")(symbols)
+crypto_app.command("fetch")(fetch)
+crypto_app.command("inventory")(inventory)
+crypto_app.command("validate")(validate)
+app.add_typer(crypto_app, name="crypto")
+app.add_typer(alpaca_app, name="alpaca")
 
 
 def main() -> None:

@@ -428,6 +428,32 @@ class TestCLI:
         assert "BTC/USDT" in result.stdout
         assert "ETH/USDT" in result.stdout
 
+    @patch("data_fetcher.providers.crypto.create_exchange")
+    def test_crypto_symbols_command_alias(self, mock_create: Mock) -> None:
+        """Verify provider-scoped crypto symbols command works."""
+        mock_exchange = Mock()
+        mock_exchange.markets = {
+            "BTC/USDT": {"base": "BTC", "quote": "USDT", "active": True, "type": "spot", "limits": {}, "precision": {}},
+            "ETH/USDT": {"base": "ETH", "quote": "USDT", "active": True, "type": "spot", "limits": {}, "precision": {}},
+        }
+        mock_create.return_value = mock_exchange
+
+        result = runner.invoke(app, ["crypto", "symbols", "--exchange", "binance", "--quote", "USDT"])
+        assert result.exit_code == 0
+        assert "BTC/USDT" in result.stdout
+        assert "ETH/USDT" in result.stdout
+
+    @patch("data_fetcher.data.AlpacaDataFetcher")
+    def test_alpaca_symbols_command(self, mock_fetcher_cls: Mock) -> None:
+        """Verify provider-scoped Alpaca symbols command works."""
+        mock_fetcher_cls.return_value.get_ticker.return_value = ["MSFT", "AAPL", "GOOG"]
+
+        result = runner.invoke(app, ["alpaca", "symbols", "--limit", "0"])
+        assert result.exit_code == 0
+        assert "AAPL" in result.stdout
+        assert "GOOG" in result.stdout
+        assert "MSFT" in result.stdout
+
     def test_inventory_no_db(self) -> None:
         """Verify inventory on non-existent database (should create but be empty)."""
         with tempfile.TemporaryDirectory() as tmpdir:

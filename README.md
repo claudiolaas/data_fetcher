@@ -53,6 +53,17 @@ symbols
 fetch
 inventory
 validate
+crypto ...
+alpaca symbols
+```
+
+The original top-level commands are crypto commands. Provider-scoped aliases are
+also available:
+
+```bash
+uv run data-fetcher crypto symbols --exchange binance --quote USDT
+uv run data-fetcher crypto fetch --exchange binance --symbols BTC/USDT
+uv run data-fetcher alpaca symbols
 ```
 
 ### List Exchanges
@@ -78,6 +89,30 @@ Useful filters:
 uv run data-fetcher symbols --exchange binance --base BTC
 uv run data-fetcher symbols --exchange binance --contains ETH
 uv run data-fetcher symbols --exchange binance --quote USDT --limit 50
+```
+
+Provider-scoped equivalent:
+
+```bash
+uv run data-fetcher crypto symbols \
+  --exchange binance \
+  --quote USDC \
+  --active-only \
+  --limit 0
+```
+
+List Alpaca symbols:
+
+```bash
+uv run data-fetcher alpaca symbols --limit 0
+```
+
+Alpaca commands require optional dependencies and credentials:
+
+```bash
+uv pip install -e ".[alpaca]"
+export ALPACA_API_KEY=...
+export ALPACA_SECRET_KEY=...
 ```
 
 ### Fetch OHLCV
