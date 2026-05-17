@@ -7,9 +7,11 @@ from typing import List
 from unittest.mock import Mock, patch
 
 import pytest
+import pandas as pd
 from typer.testing import CliRunner
 
 from data_fetcher.cli import app
+from data_fetcher.data import BaseDataFetcher
 from data_fetcher.storage.sqlite import SQLiteStore
 
 runner = CliRunner()
@@ -346,6 +348,57 @@ class TestFetchLoop:
             limit=1000,
         )
         assert [row[0] for row in candles] == [0, 3_600_000]
+
+
+# ---------------------------------------------------------------------------
+# Legacy CSV Cache Tests
+# ---------------------------------------------------------------------------
+
+
+class DummyDataFetcher(BaseDataFetcher):
+    def get_data(self) -> pd.DataFrame:
+        return pd.DataFrame()
+
+    def get_markets(self) -> dict:
+        return {}
+
+    def get_ticker(self) -> list[str]:
+        return []
+
+
+class TestLegacyCsvCacheNaming:
+    def test_build_actual_date_filename_uses_returned_data_dates(self) -> None:
+        fetcher = DummyDataFetcher()
+        frame = pd.DataFrame(
+            {
+                "dt": [
+                    "2023-04-21 04:00:00+00:00",
+                    "2025-01-03 05:00:00+00:00",
+                ]
+            }
+        )
+
+        filename = fetcher.build_actual_date_filename(
+            frame,
+            ticker="AACT.U",
+            step="1d",
+            fallback_start="1800-01-01",
+            fallback_end="2025-01-05",
+        )
+
+        assert filename == "AACT.U_1d_2023-04-21_2025-01-03.csv"
+
+    def test_build_actual_date_filename_falls_back_without_dates(self) -> None:
+        fetcher = DummyDataFetcher()
+        filename = fetcher.build_actual_date_filename(
+            pd.DataFrame(),
+            ticker="AACT.U",
+            step="1d",
+            fallback_start="1800-01-01",
+            fallback_end="2025-01-05",
+        )
+
+        assert filename == "AACT.U_1d_1800-01-01_2025-01-05.csv"
 
 
 # ---------------------------------------------------------------------------

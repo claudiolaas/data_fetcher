@@ -66,6 +66,33 @@ class BaseDataFetcher(ABC):
             return pd.read_csv(my_file)
         return None
 
+    def build_cache_filename(
+        self,
+        ticker: str,
+        step: str,
+        start_date: str,
+        end_date: str,
+    ) -> str:
+        return f'{ticker.replace("/","-")}_{step}_{start_date}_{end_date}.csv'
+
+    def build_actual_date_filename(
+        self,
+        df: pd.DataFrame,
+        ticker: str,
+        step: str,
+        fallback_start: str,
+        fallback_end: str,
+        datetime_column: str = "dt",
+    ) -> str:
+        if df.empty or datetime_column not in df.columns:
+            return self.build_cache_filename(ticker, step, fallback_start, fallback_end)
+        dates = pd.to_datetime(df[datetime_column], errors="coerce").dropna()
+        if dates.empty:
+            return self.build_cache_filename(ticker, step, fallback_start, fallback_end)
+        start = dates.min().strftime("%Y-%m-%d")
+        end = dates.max().strftime("%Y-%m-%d")
+        return self.build_cache_filename(ticker, step, start, end)
+
 
 # ---------------------------------------------------------------------------
 # Alpaca - optional (lazy import inside methods)
@@ -161,8 +188,8 @@ class AlpacaDataFetcher(BaseDataFetcher):
         logger = logging.getLogger(__name__)
 
         since, until = self.handle_time_boundaries(start_date, end_date)
-        since_str = since.strftime("%Y-%m-%d")
-        until_str = until.strftime("%Y-%m-%d")
+        requested_since_str = since.strftime("%Y-%m-%d")
+        requested_until_str = until.strftime("%Y-%m-%d")
 
         today = datetime.today().date()
         if until.date() > today:
@@ -172,19 +199,25 @@ class AlpacaDataFetcher(BaseDataFetcher):
                 today,
             )
 
-        filename = f'{ticker.replace("/","-")}_{step}_{since_str}_{until_str}.csv'
-        cached_df = self.check_cached_file(filename)
-        if cached_df is not None:
-            logger.info("Using cached data from %s", filename)
-            return cached_df
+        if start_date != "earliest":
+            filename = self.build_cache_filename(
+                ticker,
+                step,
+                requested_since_str,
+                requested_until_str,
+            )
+            cached_df = self.check_cached_file(filename)
+            if cached_df is not None:
+                logger.info("Using cached data from %s", filename)
+                return cached_df
 
         df = self.fetch_alpaca_data(ticker, since, until, step)
         if df.empty:
             logger.warning(
                 "No data found for %s between %s and %s",
                 ticker,
-                since_str,
-                until_str,
+                requested_since_str,
+                requested_until_str,
             )
             return pd.DataFrame()
 
@@ -192,6 +225,13 @@ class AlpacaDataFetcher(BaseDataFetcher):
         df = df.reset_index()
         df.rename(columns={"timestamp": "dt"}, inplace=True)
         df["dt"] = pd.to_datetime(df["dt"])
+        filename = self.build_actual_date_filename(
+            df,
+            ticker,
+            step,
+            requested_since_str,
+            requested_until_str,
+        )
         self.save_to_file(df, filename)
         return df
 

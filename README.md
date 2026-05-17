@@ -230,6 +230,17 @@ from data_fetcher import CryptoDataFetcher
 from data_fetcher.data import AlpacaDataFetcher, PolygonDataFetcher
 ```
 
+## Legacy CSV Cache
+
+The `csvs/` directory is a legacy cache used by Alpaca and Polygon compatibility
+classes. It is not used by the new crypto OHLCV CLI, which writes SQLite
+instead.
+
+Older CSV files may have names beginning with `1800-01-01` because previous
+Alpaca `earliest` requests used the requested fallback boundary in the filename.
+New legacy CSV saves use the actual first and last datetimes returned in the
+data.
+
 ## Development
 
 Run checks:
