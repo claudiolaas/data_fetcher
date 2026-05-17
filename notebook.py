@@ -1,5 +1,5 @@
 #%%
-from data_fetcher import CryptoDataFetcher, AlpacaDataFetcher, PolygonDataFetcher
+from data_fetcher import AlpacaDataFetcher
 from dotenv import load_dotenv
 import logging
 import sys
