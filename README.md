@@ -54,6 +54,7 @@ Available Phase 1 commands:
 ```text
 exchanges
 symbols
+start-dates
 fetch
 inventory
 validate
@@ -66,6 +67,7 @@ also available:
 
 ```bash
 uv run data-fetcher crypto symbols --exchange binance --quote USDT
+uv run data-fetcher crypto start-dates --exchange binance --symbols BTC/USDT
 uv run data-fetcher crypto fetch --exchange binance --symbols BTC/USDT
 uv run data-fetcher alpaca symbols
 ```
@@ -93,6 +95,7 @@ Useful filters:
 uv run data-fetcher symbols --exchange binance --base BTC
 uv run data-fetcher symbols --exchange binance --contains ETH
 uv run data-fetcher symbols --exchange binance --quote USDT --limit 50
+uv run data-fetcher symbols --exchange binance --quote USDT --format symbols
 ```
 
 Provider-scoped equivalent:
@@ -119,6 +122,58 @@ export ALPACA_API_KEY=...
 export ALPACA_SECRET_KEY=...
 uv run data-fetcher alpaca symbols --limit 0
 ```
+
+### Start Dates
+
+Show the first available OHLCV candle for explicit symbols:
+
+```bash
+uv run data-fetcher start-dates \
+  --exchange binance \
+  --symbols BTC/USDT,ETH/USDT \
+  --timeframe 1h
+```
+
+Discover symbols with the same filters as `symbols`, then probe each start date:
+
+```bash
+uv run data-fetcher crypto start-dates \
+  --exchange binance \
+  --quote USDC \
+  --active-only \
+  --limit 0 \
+  --timeframe 1h
+```
+
+For larger symbol sets, write a symbol list and pass it back in:
+
+```bash
+uv run data-fetcher symbols \
+  --exchange binance \
+  --quote USDC \
+  --limit 0 \
+  --format symbols > symbols.txt
+
+uv run data-fetcher start-dates --exchange binance --symbols-file symbols.txt
+```
+
+### Visual Symbol Lifetime Report
+
+The visual report is intentionally kept outside the main CLI. Use the standalone
+script when you want an exploratory HTML view of which symbols have existed and
+which are still active according to the exchange metadata.
+
+```bash
+uv run python scripts/symbol_lifetime_report.py \
+  --exchange binance \
+  --quote USDC \
+  --limit 0 \
+  --csv-output reports/binance_usdc_lifetimes.csv \
+  --html-output reports/binance_usdc_lifetimes.html
+```
+
+Add `--active-only` to exclude inactive markets, or `--all-types` to include
+non-spot markets exposed by CCXT.
 
 ### Fetch OHLCV
 

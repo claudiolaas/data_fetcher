@@ -443,6 +443,99 @@ class TestCLI:
         assert "BTC/USDT" in result.stdout
         assert "ETH/USDT" in result.stdout
 
+    @patch("data_fetcher.providers.crypto.create_exchange")
+    def test_symbols_command_symbols_format(self, mock_create: Mock) -> None:
+        """Verify symbols can print one symbol per line for chaining."""
+        mock_exchange = Mock()
+        mock_exchange.markets = {
+            "BTC/USDT": {"base": "BTC", "quote": "USDT", "active": True, "type": "spot", "limits": {}, "precision": {}},
+            "ETH/USDT": {"base": "ETH", "quote": "USDT", "active": True, "type": "spot", "limits": {}, "precision": {}},
+        }
+        mock_create.return_value = mock_exchange
+
+        result = runner.invoke(
+            app,
+            [
+                "symbols",
+                "--exchange",
+                "binance",
+                "--quote",
+                "USDT",
+                "--format",
+                "symbols",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == ["BTC/USDT", "ETH/USDT"]
+
+    @patch("data_fetcher.providers.crypto.create_exchange")
+    def test_start_dates_command_explicit_symbols(self, mock_create: Mock) -> None:
+        """Verify start-dates probes explicit symbols."""
+        mock_exchange = Mock()
+        mock_exchange.markets = {}
+        mock_exchange.fetch_ohlcv.return_value = [
+            [1502942400000, 100.0, 101.0, 99.0, 100.5, 10.0],
+        ]
+        mock_exchange.milliseconds.return_value = 1704067200000
+        mock_exchange.iso8601.return_value = "2017-08-17T04:00:00.000Z"
+        mock_create.return_value = mock_exchange
+
+        result = runner.invoke(
+            app,
+            [
+                "start-dates",
+                "--exchange",
+                "binance",
+                "--symbols",
+                "BTC/USDT,ETH/USDT",
+                "--timeframe",
+                "1h",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert "BTC/USDT" in result.stdout
+        assert "ETH/USDT" in result.stdout
+        assert "2017-08-17T04:00:00.000Z" in result.stdout
+        assert mock_exchange.fetch_ohlcv.call_count == 2
+
+    @patch("data_fetcher.providers.crypto.create_exchange")
+    def test_crypto_start_dates_command_discovers_symbols(self, mock_create: Mock) -> None:
+        """Verify provider-scoped start-dates can discover symbols by filters."""
+        mock_exchange = Mock()
+        mock_exchange.markets = {
+            "BTC/USDT": {"base": "BTC", "quote": "USDT", "active": True, "type": "spot", "limits": {}, "precision": {}},
+            "ETH/USDT": {"base": "ETH", "quote": "USDT", "active": True, "type": "spot", "limits": {}, "precision": {}},
+            "BTC/EUR": {"base": "BTC", "quote": "EUR", "active": True, "type": "spot", "limits": {}, "precision": {}},
+        }
+        mock_exchange.fetch_ohlcv.return_value = [
+            [1502942400000, 100.0, 101.0, 99.0, 100.5, 10.0],
+        ]
+        mock_exchange.milliseconds.return_value = 1704067200000
+        mock_exchange.iso8601.return_value = "2017-08-17T04:00:00.000Z"
+        mock_create.return_value = mock_exchange
+
+        result = runner.invoke(
+            app,
+            [
+                "crypto",
+                "start-dates",
+                "--exchange",
+                "binance",
+                "--quote",
+                "USDT",
+                "--limit",
+                "0",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert "BTC/USDT" in result.stdout
+        assert "ETH/USDT" in result.stdout
+        assert "BTC/EUR" not in result.stdout
+        assert mock_exchange.fetch_ohlcv.call_count == 2
+
     @patch("data_fetcher.data.AlpacaDataFetcher")
     def test_alpaca_symbols_command(self, mock_fetcher_cls: Mock) -> None:
         """Verify provider-scoped Alpaca symbols command works."""

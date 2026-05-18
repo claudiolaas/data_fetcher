@@ -4,7 +4,7 @@ import logging
 import sys
 import time as time_module
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import typer
 
@@ -38,6 +38,77 @@ def _setup_logging(verbose: bool = False) -> None:
         level=level,
         format="%(asctime)s [%(levelname)s] %(message)s",
         stream=sys.stdout,
+    )
+
+
+def _read_symbol_file(symbols_file: Path) -> List[str]:
+    symbol_list: List[str] = []
+    with open(symbols_file) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                symbol_list.append(line)
+    return symbol_list
+
+
+def _filter_discovered_symbols(
+    rows: List[Dict],
+    base: Optional[str] = None,
+    contains: Optional[str] = None,
+    limit: int = 200,
+) -> List[Dict]:
+    if base:
+        rows = [r for r in rows if r.get("base") == base]
+    if contains:
+        rows = [r for r in rows if contains.upper() in r["symbol"].upper()]
+    if limit > 0:
+        rows = rows[:limit]
+    return rows
+
+
+def _build_symbol_rows(
+    fetcher: CryptoDataFetcher,
+    symbols: Optional[str],
+    symbols_file: Optional[Path],
+    quote: Optional[str],
+    active_only: bool,
+    spot_only: bool,
+    base: Optional[str],
+    contains: Optional[str],
+    limit: int,
+) -> List[Dict]:
+    symbol_list: List[str] = []
+    if symbols:
+        symbol_list.extend(s.strip() for s in symbols.split(",") if s.strip())
+    if symbols_file:
+        symbol_list.extend(_read_symbol_file(symbols_file))
+
+    if symbol_list:
+        markets = fetcher.get_markets()
+        rows = []
+        for symbol in symbol_list:
+            info = markets.get(symbol, {})
+            rows.append(
+                {
+                    "symbol": symbol,
+                    "base": info.get("base", ""),
+                    "quote": info.get("quote", ""),
+                    "type": info.get("type", ""),
+                    "active": info.get("active", ""),
+                }
+            )
+        return rows
+
+    discovered = fetcher.get_symbols(
+        quote=quote,
+        active_only=active_only,
+        spot_only=spot_only,
+    )
+    return _filter_discovered_symbols(
+        discovered,
+        base=base,
+        contains=contains,
+        limit=limit,
     )
 
 
@@ -79,26 +150,42 @@ def symbols(
     base: Optional[str] = typer.Option(None, "--base", "-b", help="Filter by base currency"),
     contains: Optional[str] = typer.Option(None, "--contains", help="Filter symbol containing text"),
     limit: int = typer.Option(200, "--limit", "-n", help="Maximum number of symbols to show"),
+    output_format: str = typer.Option(
+        "table",
+        "--format",
+        help="Output format: table or symbols",
+    ),
 ) -> None:
     """List available symbols from an exchange."""
     try:
         fetcher = CryptoDataFetcher(exchange_id=exchange)
-        results = fetcher.get_symbols(quote=quote, active_only=active_only, spot_only=spot_only)
+        results = fetcher.get_symbols(
+            quote=quote,
+            active_only=active_only,
+            spot_only=spot_only,
+        )
     except Exception as e:
         typer.echo(f"Error loading exchange {exchange}: {e}", err=True)
         raise typer.Exit(code=1)
 
-    if base:
-        results = [r for r in results if r.get("base") == base]
-    if contains:
-        results = [r for r in results if contains.upper() in r["symbol"].upper()]
-
-    if limit > 0:
-        results = results[:limit]
+    results = _filter_discovered_symbols(
+        results,
+        base=base,
+        contains=contains,
+        limit=limit,
+    )
 
     if not results:
         typer.echo("No symbols found matching the given filters.")
         raise typer.Exit(code=0)
+
+    if output_format == "symbols":
+        for r in results:
+            print(r["symbol"])
+        return
+    if output_format != "table":
+        typer.echo("Invalid --format. Use 'table' or 'symbols'.", err=True)
+        raise typer.Exit(code=1)
 
     header = f"{'symbol':<20} {'base':<12} {'quote':<12} {'type':<8} {'active':<8}"
     print(header)
@@ -108,6 +195,100 @@ def symbols(
             f"{r['symbol']:<20} {str(r['base']):<12} {str(r['quote']):<12} "
             f"{r['type']:<8} {str(r['active']):<8}"
         )
+
+
+@app.command()
+def start_dates(
+    exchange: str = typer.Option(
+        DEFAULT_EXCHANGE,
+        "--exchange",
+        "-e",
+        help="CCXT exchange ID",
+    ),
+    symbols: Optional[str] = typer.Option(
+        None,
+        "--symbols",
+        "-s",
+        help="Comma-separated symbol list",
+    ),
+    symbols_file: Optional[Path] = typer.Option(
+        None,
+        "--symbols-file",
+        "-f",
+        help="File with one symbol per line",
+    ),
+    quote: Optional[str] = typer.Option(
+        None,
+        "--quote",
+        "-q",
+        help="Filter by quote currency when discovering symbols",
+    ),
+    timeframe: str = typer.Option(
+        "1h",
+        "--timeframe",
+        "-t",
+        help="Candle timeframe used for earliest-candle probing",
+    ),
+    active_only: bool = typer.Option(
+        True,
+        "--active-only/--include-inactive",
+        help="Only discover active markets",
+    ),
+    spot_only: bool = typer.Option(
+        True,
+        "--spot-only/--all-types",
+        help="Only discover spot markets",
+    ),
+    base: Optional[str] = typer.Option(
+        None,
+        "--base",
+        "-b",
+        help="Filter discovered symbols by base currency",
+    ),
+    contains: Optional[str] = typer.Option(
+        None,
+        "--contains",
+        help="Filter discovered symbols containing text",
+    ),
+    limit: int = typer.Option(
+        200,
+        "--limit",
+        "-n",
+        help="Maximum number of symbols to check when discovering (0 = unlimited)",
+    ),
+) -> None:
+    """Show earliest available OHLCV start dates for symbols."""
+    try:
+        fetcher = CryptoDataFetcher(exchange_id=exchange)
+    except Exception as e:
+        typer.echo(f"Error loading exchange {exchange}: {e}", err=True)
+        raise typer.Exit(code=1)
+
+    symbol_rows = _build_symbol_rows(
+        fetcher=fetcher,
+        symbols=symbols,
+        symbols_file=symbols_file,
+        quote=quote,
+        active_only=active_only,
+        spot_only=spot_only,
+        base=base,
+        contains=contains,
+        limit=limit,
+    )
+    symbol_list = [r["symbol"] for r in symbol_rows]
+
+    if not symbol_list:
+        typer.echo("No symbols to check.")
+        raise typer.Exit(code=0)
+
+    header = f"{'exchange':<12} {'symbol':<20} {'timeframe':<10} {'start_date_utc':<25} {'method':<14}"
+    print(header)
+    print("-" * len(header))
+
+    for sym in symbol_list:
+        ts, method = fetcher.fetch_earliest_timestamp(sym, timeframe)
+        start = fetcher.exchange.iso8601(ts) if ts is not None else "N/A"
+        print(f"{exchange:<12} {sym:<20} {timeframe:<10} {start:<25} {method:<14}")
 
 
 @app.command()
@@ -340,6 +521,7 @@ def alpaca_symbols(
 # compatibility with the initial crypto-only CLI.
 crypto_app.command("exchanges")(exchanges)
 crypto_app.command("symbols")(symbols)
+crypto_app.command("start-dates")(start_dates)
 crypto_app.command("fetch")(fetch)
 crypto_app.command("inventory")(inventory)
 crypto_app.command("validate")(validate)
