@@ -1,17 +1,24 @@
 """SQLite persistence layer for OHLCV data."""
 
 import logging
+import re
 import sqlite3
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+import pandas as pd
 
 from data_fetcher.models import InventoryRow, ValidationResult
 
 logger = logging.getLogger(__name__)
 
+PRICE_FRAME_COLUMNS = ["milliseconds", "timestamp", "symbol", "price", "volume"]
+PRICE_FRAME_KEY_COLUMNS = ["exchange", "timeframe"]
 
-#: Canonical schema for the price_data table.
+
+#: Canonical schema for the price_data table. ``price`` stores the candle
+#: close. ``open``, ``high``, and ``low`` are preserved for consumers that need
+#: full OHLCV context.
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS price_data (
     milliseconds INTEGER NOT NULL,
@@ -147,6 +154,162 @@ class SQLiteStore:
             return cursor.rowcount
         finally:
             conn.close()
+
+    def load_price_frame(
+        self,
+        symbol: str,
+        timeframe: Optional[str],
+        exchange: Optional[str] = "binance",
+        start_ms: Optional[int] = None,
+        end_ms: Optional[int] = None,
+        include_key_columns: bool = False,
+    ) -> pd.DataFrame:
+        """Return backtesting-compatible price rows for one symbol.
+
+        The returned frame contains ``milliseconds``, ``timestamp``, ``symbol``,
+        ``price`` (the candle close), and ``volume`` by default. Rows are
+        ordered by ``milliseconds``. Time bounds are inclusive.
+
+        Passing ``exchange=None`` or ``timeframe=None`` is allowed only when the
+        matching rows are unambiguous for that dimension.
+        """
+        return self.load_prices(
+            symbols=[symbol],
+            timeframe=timeframe,
+            exchange=exchange,
+            start_ms=start_ms,
+            end_ms=end_ms,
+            include_key_columns=include_key_columns,
+        )
+
+    def load_prices(
+        self,
+        symbols: Optional[List[str]] = None,
+        timeframe: Optional[str] = None,
+        exchange: Optional[str] = None,
+        start_ms: Optional[int] = None,
+        end_ms: Optional[int] = None,
+        include_key_columns: bool = False,
+    ) -> pd.DataFrame:
+        """Return backtesting-compatible price rows.
+
+        Empty matches return an empty DataFrame with the expected columns.
+        Reads that would mix multiple exchanges or timeframes raise
+        ``ValueError`` unless the ambiguous dimension is explicitly filtered.
+        """
+        select_columns = list(PRICE_FRAME_COLUMNS)
+        if include_key_columns:
+            select_columns.extend(PRICE_FRAME_KEY_COLUMNS)
+        if symbols is not None and len(symbols) == 0:
+            return pd.DataFrame(columns=select_columns)
+
+        conditions, params = self._build_price_conditions(
+            symbols=symbols,
+            timeframe=timeframe,
+            exchange=exchange,
+            start_ms=start_ms,
+            end_ms=end_ms,
+        )
+        where = " AND ".join(conditions) if conditions else "1"
+
+        conn = self._connect()
+        try:
+            self._raise_for_ambiguous_read(conn, where, params, exchange, timeframe)
+            sql = f"""
+                SELECT {", ".join(select_columns)}
+                FROM price_data
+                WHERE {where}
+                ORDER BY symbol, milliseconds
+            """
+            return pd.read_sql_query(sql, conn, params=params)
+        finally:
+            conn.close()
+
+    def create_backtesting_view(
+        self,
+        view_name: str = "backtesting_price_data",
+        exchange: str = "binance",
+        timeframe: str = "1h",
+    ) -> None:
+        """Create or replace a legacy-compatible price view for one key."""
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", view_name):
+            raise ValueError("view_name must be a simple SQLite identifier")
+
+        conn = self._connect()
+        try:
+            exchange_literal = conn.execute("SELECT quote(?)", (exchange,)).fetchone()[0]
+            timeframe_literal = conn.execute("SELECT quote(?)", (timeframe,)).fetchone()[0]
+            conn.execute(f"DROP VIEW IF EXISTS {view_name}")
+            conn.execute(
+                f"""
+                CREATE VIEW {view_name} AS
+                SELECT milliseconds, timestamp, symbol, price, volume
+                FROM price_data
+                WHERE exchange = {exchange_literal}
+                  AND timeframe = {timeframe_literal}
+                """
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _build_price_conditions(
+        self,
+        symbols: Optional[List[str]] = None,
+        timeframe: Optional[str] = None,
+        exchange: Optional[str] = None,
+        start_ms: Optional[int] = None,
+        end_ms: Optional[int] = None,
+    ) -> Tuple[List[str], List[object]]:
+        conditions: List[str] = []
+        params: List[object] = []
+
+        if exchange is not None:
+            conditions.append("exchange = ?")
+            params.append(exchange)
+        if symbols:
+            placeholders = ", ".join("?" for _ in symbols)
+            conditions.append(f"symbol IN ({placeholders})")
+            params.extend(symbols)
+        if timeframe is not None:
+            conditions.append("timeframe = ?")
+            params.append(timeframe)
+        if start_ms is not None:
+            conditions.append("milliseconds >= ?")
+            params.append(start_ms)
+        if end_ms is not None:
+            conditions.append("milliseconds <= ?")
+            params.append(end_ms)
+
+        return conditions, params
+
+    def _raise_for_ambiguous_read(
+        self,
+        conn: sqlite3.Connection,
+        where: str,
+        params: List[object],
+        exchange: Optional[str],
+        timeframe: Optional[str],
+    ) -> None:
+        if exchange is None:
+            row = conn.execute(
+                f"SELECT COUNT(DISTINCT exchange) AS count FROM price_data WHERE {where}",
+                params,
+            ).fetchone()
+            if row["count"] > 1:
+                raise ValueError(
+                    "exchange is required because multiple exchanges are present"
+                )
+
+        if timeframe is None:
+            row = conn.execute(
+                f"SELECT COUNT(DISTINCT timeframe) AS count FROM price_data WHERE {where}",
+                params,
+            ).fetchone()
+            if row["count"] > 1:
+                raise ValueError(
+                    "timeframe is required because multiple timeframes are present"
+                )
 
     def get_inventory(
         self,

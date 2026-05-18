@@ -685,6 +685,41 @@ def validate(
         )
 
 
+@app.command("export-prices")
+def export_prices(
+    db_path: str = typer.Option("data/crypto_ohlcv.db", "--db-path", "-d", help="Path to SQLite database"),
+    exchange: Optional[str] = typer.Option(None, "--exchange", "-e", help="Filter by exchange"),
+    timeframe: Optional[str] = typer.Option(None, "--timeframe", "-t", help="Filter by timeframe"),
+    symbols: Optional[str] = typer.Option(None, "--symbols", "-s", help="Comma-separated symbol list"),
+    start_ms: Optional[int] = typer.Option(None, "--start-ms", help="Inclusive start timestamp in milliseconds"),
+    end_ms: Optional[int] = typer.Option(None, "--end-ms", help="Inclusive end timestamp in milliseconds"),
+    output_format: str = typer.Option("csv", "--format", help="Output format: csv or json"),
+) -> None:
+    """Export backtesting-compatible price rows from SQLite."""
+    symbol_list = [s.strip() for s in symbols.split(",") if s.strip()] if symbols else None
+    store = SQLiteStore(db_path)
+
+    try:
+        df = store.load_prices(
+            symbols=symbol_list,
+            exchange=exchange,
+            timeframe=timeframe,
+            start_ms=start_ms,
+            end_ms=end_ms,
+        )
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    if output_format == "csv":
+        typer.echo(df.to_csv(index=False), nl=False)
+    elif output_format == "json":
+        typer.echo(df.to_json(orient="records"))
+    else:
+        typer.echo("Invalid --format. Use 'csv' or 'json'.", err=True)
+        raise typer.Exit(code=1)
+
+
 @alpaca_app.command("symbols")
 def alpaca_symbols(
     contains: Optional[str] = typer.Option(None, "--contains", help="Filter symbol containing text"),
@@ -737,6 +772,7 @@ crypto_app.command("fetch")(fetch)
 crypto_app.command("bulk-fetch")(bulk_fetch)
 crypto_app.command("inventory")(inventory)
 crypto_app.command("validate")(validate)
+crypto_app.command("export-prices")(export_prices)
 app.add_typer(crypto_app, name="crypto")
 app.add_typer(alpaca_app, name="alpaca")
 

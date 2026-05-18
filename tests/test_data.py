@@ -237,6 +237,220 @@ class TestSQLiteStoreDelete:
         assert count == 0
 
 
+class TestSQLiteStorePriceReads:
+    def test_load_price_frame_filters_and_orders_rows(
+        self, store: SQLiteStore, sample_ohlcv_rows: List[tuple]
+    ) -> None:
+        rows = [
+            sample_ohlcv_rows[1],
+            (
+                1704067200000,
+                "2024-01-01T00:00:00Z",
+                "coinbase",
+                "BTC/USDT",
+                "1h",
+                42000.0,
+                42100.0,
+                41900.0,
+                42050.0,
+                100.5,
+            ),
+            (
+                1704067200000,
+                "2024-01-01T00:00:00Z",
+                "binance",
+                "BTC/USDT",
+                "1d",
+                42000.0,
+                42100.0,
+                41900.0,
+                42050.0,
+                100.5,
+            ),
+            sample_ohlcv_rows[0],
+        ]
+        store.insert_ohlcv(rows)
+
+        df = store.load_price_frame(
+            symbol="BTC/USDT",
+            exchange="binance",
+            timeframe="1h",
+        )
+
+        assert list(df.columns) == ["milliseconds", "timestamp", "symbol", "price", "volume"]
+        assert df["milliseconds"].tolist() == [1704067200000, 1704070800000]
+        assert df["price"].tolist() == [42050.0, 42150.0]
+
+    def test_load_price_frame_time_bounds_are_inclusive(
+        self, store: SQLiteStore, sample_ohlcv_rows: List[tuple]
+    ) -> None:
+        store.insert_ohlcv(sample_ohlcv_rows)
+
+        df = store.load_price_frame(
+            symbol="BTC/USDT",
+            exchange="binance",
+            timeframe="1h",
+            start_ms=1704070800000,
+            end_ms=1704074400000,
+        )
+
+        assert df["milliseconds"].tolist() == [1704070800000, 1704074400000]
+
+    def test_load_prices_orders_by_symbol_then_milliseconds(self, store: SQLiteStore) -> None:
+        rows = [
+            (1704070800000, "2024-01-01T01:00:00Z", "binance", "ETH/USDT", "1h", 100, 101, 99, 100.5, 10),
+            (1704067200000, "2024-01-01T00:00:00Z", "binance", "BTC/USDT", "1h", 200, 201, 199, 200.5, 20),
+            (1704067200000, "2024-01-01T00:00:00Z", "binance", "ETH/USDT", "1h", 99, 100, 98, 99.5, 9),
+        ]
+        store.insert_ohlcv(rows)
+
+        df = store.load_prices(exchange="binance", timeframe="1h")
+
+        assert df[["symbol", "milliseconds"]].values.tolist() == [
+            ["BTC/USDT", 1704067200000],
+            ["ETH/USDT", 1704067200000],
+            ["ETH/USDT", 1704070800000],
+        ]
+
+    def test_load_prices_empty_symbol_list_returns_empty_frame(self, store: SQLiteStore) -> None:
+        rows = [
+            (1704067200000, "2024-01-01T00:00:00Z", "binance", "BTC/USDT", "1h", 200, 201, 199, 200.5, 20),
+        ]
+        store.insert_ohlcv(rows)
+
+        df = store.load_prices(symbols=[], exchange="binance", timeframe="1h")
+
+        assert df.empty
+        assert list(df.columns) == ["milliseconds", "timestamp", "symbol", "price", "volume"]
+
+    def test_load_price_frame_raises_on_ambiguous_exchange(self, store: SQLiteStore) -> None:
+        rows = [
+            (1704067200000, "2024-01-01T00:00:00Z", "binance", "BTC/USDT", "1h", 100, 101, 99, 100.5, 10),
+            (1704067200000, "2024-01-01T00:00:00Z", "coinbase", "BTC/USDT", "1h", 100, 101, 99, 100.5, 10),
+        ]
+        store.insert_ohlcv(rows)
+
+        with pytest.raises(ValueError, match="exchange is required"):
+            store.load_price_frame("BTC/USDT", exchange=None, timeframe="1h")
+
+    def test_load_price_frame_raises_on_ambiguous_timeframe(self, store: SQLiteStore) -> None:
+        rows = [
+            (1704067200000, "2024-01-01T00:00:00Z", "binance", "BTC/USDT", "1h", 100, 101, 99, 100.5, 10),
+            (1704067200000, "2024-01-01T00:00:00Z", "binance", "BTC/USDT", "1d", 100, 101, 99, 100.5, 10),
+        ]
+        store.insert_ohlcv(rows)
+
+        with pytest.raises(ValueError, match="timeframe is required"):
+            store.load_price_frame("BTC/USDT", exchange="binance", timeframe=None)
+
+    def test_load_price_frame_empty_result_has_expected_columns(self, store: SQLiteStore) -> None:
+        df = store.load_price_frame(
+            symbol="MISSING/USDT",
+            exchange="binance",
+            timeframe="1h",
+        )
+
+        assert df.empty
+        assert list(df.columns) == ["milliseconds", "timestamp", "symbol", "price", "volume"]
+
+    def test_load_prices_can_include_key_columns(
+        self, store: SQLiteStore, sample_ohlcv_rows: List[tuple]
+    ) -> None:
+        store.insert_ohlcv(sample_ohlcv_rows[:1])
+
+        df = store.load_prices(
+            symbols=["BTC/USDT"],
+            exchange="binance",
+            timeframe="1h",
+            include_key_columns=True,
+        )
+
+        assert list(df.columns) == [
+            "milliseconds",
+            "timestamp",
+            "symbol",
+            "price",
+            "volume",
+            "exchange",
+            "timeframe",
+        ]
+        assert df.loc[0, "exchange"] == "binance"
+        assert df.loc[0, "timeframe"] == "1h"
+
+    def test_price_stores_close_value(self, store: SQLiteStore, sample_ohlcv_rows: List[tuple]) -> None:
+        store.insert_ohlcv(sample_ohlcv_rows[:1])
+
+        df = store.load_price_frame("BTC/USDT", exchange="binance", timeframe="1h")
+
+        assert df.loc[0, "price"] == sample_ohlcv_rows[0][8]
+
+    def test_create_backtesting_view(self, store: SQLiteStore, sample_ohlcv_rows: List[tuple]) -> None:
+        store.insert_ohlcv(
+            sample_ohlcv_rows
+            + [
+                (
+                    1704067200000,
+                    "2024-01-01T00:00:00Z",
+                    "binance",
+                    "BTC/USDT",
+                    "1d",
+                    42000.0,
+                    42100.0,
+                    41900.0,
+                    42050.0,
+                    100.5,
+                )
+            ]
+        )
+
+        store.create_backtesting_view(exchange="binance", timeframe="1h")
+        conn = sqlite3.connect(store.db_path)
+        rows = conn.execute(
+            "SELECT milliseconds, timestamp, symbol, price, volume "
+            "FROM backtesting_price_data ORDER BY milliseconds"
+        ).fetchall()
+        conn.close()
+
+        assert len(rows) == 3
+        assert rows[0] == (
+            1704067200000,
+            "2024-01-01T00:00:00Z",
+            "BTC/USDT",
+            42050.0,
+            100.5,
+        )
+
+    def test_create_backtesting_view_replaces_existing_view(self, store: SQLiteStore) -> None:
+        rows = [
+            (1704067200000, "2024-01-01T00:00:00Z", "binance", "BTC/USDT", "1h", 100, 101, 99, 100.5, 10),
+            (1704067200000, "2024-01-01T00:00:00Z", "binance", "BTC/USDT", "1d", 200, 201, 199, 200.5, 20),
+        ]
+        store.insert_ohlcv(rows)
+        store.create_backtesting_view(timeframe="1h")
+        store.create_backtesting_view(timeframe="1d")
+
+        conn = sqlite3.connect(store.db_path)
+        view_rows = conn.execute(
+            "SELECT milliseconds, timestamp, symbol, price, volume "
+            "FROM backtesting_price_data ORDER BY milliseconds"
+        ).fetchall()
+        conn.close()
+
+        assert view_rows == [
+            (
+                1704067200000,
+                "2024-01-01T00:00:00Z",
+                "BTC/USDT",
+                200.5,
+                20.0,
+            )
+        ]
+
+    def test_create_backtesting_view_rejects_invalid_name(self, store: SQLiteStore) -> None:
+        with pytest.raises(ValueError, match="view_name"):
+            store.create_backtesting_view("bad-name")
+
+
 # ---------------------------------------------------------------------------
 # Validation Tests
 # ---------------------------------------------------------------------------
@@ -641,6 +855,30 @@ class TestCLI:
         result = runner.invoke(app, ["validate", "--db-path", store.db_path])
         assert result.exit_code == 0
         assert "FAIL" in result.stdout or "WARN" in result.stdout
+
+    def test_export_prices_command(self, store: SQLiteStore, sample_ohlcv_rows: List[tuple]) -> None:
+        """Verify export-prices emits backtesting-compatible CSV."""
+        store.insert_ohlcv(sample_ohlcv_rows)
+
+        result = runner.invoke(
+            app,
+            [
+                "export-prices",
+                "--db-path",
+                store.db_path,
+                "--exchange",
+                "binance",
+                "--timeframe",
+                "1h",
+                "--symbols",
+                "BTC/USDT",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines()[0] == "milliseconds,timestamp,symbol,price,volume"
+        assert "BTC/USDT" in result.stdout
+        assert "42050.0" in result.stdout
 
     def test_exchanges_command(self) -> None:
         """Verify exchanges command lists supported exchanges."""

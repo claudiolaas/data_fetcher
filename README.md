@@ -2,15 +2,17 @@
 
 Reusable market-data fetching utilities for research projects.
 
-The current production path is a crypto OHLCV command-line tool built on
+The primary supported workflow is a crypto OHLCV command-line tool built on
 `ccxt`. It discovers symbols, fetches historical candles, stores them in a
 resumable SQLite database, and validates local data quality. Binance is the
 default exchange, but any CCXT exchange id can be selected.
 
-Alpaca and Polygon compatibility classes are still available, but their deeper
-refactor is intentionally deferred.
+Alpaca and Polygon compatibility classes remain available for projects that
+still use the older provider APIs.
 
 ## Installation
+
+Requires Python 3.9 or newer.
 
 From a local checkout:
 
@@ -41,6 +43,27 @@ all      all provider dependencies
 dev      pytest, ruff, and local development tools
 ```
 
+## Quick Start
+
+Fetch one Binance spot market into SQLite, inspect the stored range, then run
+data-quality checks:
+
+```bash
+uv run data-fetcher fetch \
+  --exchange binance \
+  --symbols BTC/USDT \
+  --timeframe 1h \
+  --since earliest \
+  --db-path data/crypto_ohlcv.db \
+  --max-requests-per-symbol 1
+
+uv run data-fetcher inventory --db-path data/crypto_ohlcv.db
+uv run data-fetcher validate --db-path data/crypto_ohlcv.db
+```
+
+Most crypto commands make live exchange requests. Keep `--max-requests-per-symbol`
+low for smoke tests, then remove it for full backfills.
+
 ## CLI
 
 The package exposes one command:
@@ -49,7 +72,7 @@ The package exposes one command:
 uv run data-fetcher --help
 ```
 
-Available Phase 1 commands:
+Available commands:
 
 ```text
 exchanges
@@ -340,6 +363,47 @@ CREATE TABLE IF NOT EXISTS price_data (
 `price` means close price. Rows are inserted with `INSERT OR IGNORE`, so reruns
 are idempotent.
 
+## Backtesting Consumers
+
+`data-fetcher` owns historical download and persistence. Backtesting code can
+read the stable price frame contract from the canonical OHLCV table:
+
+```bash
+uv run data-fetcher fetch \
+  --exchange binance \
+  --symbols BTC/USDT \
+  --timeframe 1h \
+  --since earliest \
+  --db-path /Users/clas/Documents/trading-repo/data/crypto_ohlcv.db
+```
+
+```python
+from data_fetcher.storage.sqlite import SQLiteStore
+
+store = SQLiteStore("/Users/clas/Documents/trading-repo/data/crypto_ohlcv.db")
+df = store.load_price_frame(
+    symbol="BTC/USDT",
+    exchange="binance",
+    timeframe="1h",
+)
+```
+
+The returned columns are `milliseconds`, `timestamp`, `symbol`, `price`, and
+`volume`, where `price` is the candle close. Reads raise `ValueError` rather
+than silently mixing multiple exchanges or timeframes when those filters are
+omitted.
+
+For inspection or legacy tooling, export the same contract as CSV:
+
+```bash
+uv run data-fetcher export-prices \
+  --db-path data/crypto_ohlcv.db \
+  --exchange binance \
+  --timeframe 1h \
+  --symbols BTC/USDT,ETH/USDT \
+  --format csv
+```
+
 ## Python Usage
 
 Fetch directly from a CCXT exchange:
@@ -365,6 +429,7 @@ from data_fetcher.storage.sqlite import SQLiteStore
 store = SQLiteStore("data/crypto_ohlcv.db")
 inventory = store.get_inventory(exchange="binance", timeframe="1h")
 validation = store.validate(exchange="binance", timeframe="1h")
+prices = store.load_prices(exchange="binance", timeframe="1h")
 ```
 
 Legacy imports remain available:
@@ -405,19 +470,24 @@ uv run python -m py_compile \
 Normal tests mock exchange calls and do not hit live APIs. The live smoke test
 is skipped by default.
 
+## License
+
+MIT. See [pyproject.toml](pyproject.toml) for package metadata.
+
 ## Scope
 
-Phase 1 includes:
+Currently supported:
 
 ```text
 crypto OHLCV fetching through CCXT
 Binance default exchange
+Binance public archive ingestion for bulk spot backfills
 SQLite persistence
-symbols/fetch/inventory/validate CLI
+exchanges/symbols/start-dates/fetch/bulk-fetch/inventory/validate CLI
 Alpaca and Polygon compatibility classes
 ```
 
-Deferred:
+Not currently included:
 
 ```text
 parallel fetching
