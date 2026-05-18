@@ -2,6 +2,8 @@
 
 import sqlite3
 import tempfile
+import zipfile
+from datetime import date
 from pathlib import Path
 from typing import List
 from unittest.mock import Mock, patch
@@ -12,6 +14,11 @@ from typer.testing import CliRunner
 
 from data_fetcher.cli import app
 from data_fetcher.data import BaseDataFetcher
+from data_fetcher.providers.binance_archive import (
+    archive_filename,
+    archive_url,
+    ingest_binance_archives,
+)
 from data_fetcher.storage.sqlite import SQLiteStore
 
 runner = CliRunner()
@@ -76,6 +83,61 @@ def sample_ohlcv_rows() -> List[tuple]:
             200.0,
         ),
     ]
+
+
+# ---------------------------------------------------------------------------
+# Binance Archive Tests
+# ---------------------------------------------------------------------------
+
+
+class TestBinanceArchive:
+    def test_archive_filename_and_url(self) -> None:
+        filename = archive_filename("BTCUSDT", "1h", date(2024, 1, 1), "monthly")
+        assert filename == "BTCUSDT-1h-2024-01.zip"
+        assert archive_url("BTCUSDT", "1h", date(2024, 1, 1), "monthly").endswith(
+            "/monthly/klines/BTCUSDT/1h/BTCUSDT-1h-2024-01.zip"
+        )
+
+    def test_ingest_binance_archive_zip(self, store: SQLiteStore, tmp_path: Path) -> None:
+        archive_path = (
+            tmp_path
+            / "binance"
+            / "spot"
+            / "monthly"
+            / "klines"
+            / "BTCUSDT"
+            / "1h"
+            / "BTCUSDT-1h-2024-01.zip"
+        )
+        archive_path.parent.mkdir(parents=True)
+        with zipfile.ZipFile(archive_path, "w") as zf:
+            zf.writestr(
+                "BTCUSDT-1h-2024-01.csv",
+                "\n".join(
+                    [
+                        "open_time,open,high,low,close,volume,close_time",
+                        "1704067200000,42000,42100,41900,42050,100.5,1704070799999",
+                        "1704070800000,42050,42200,42000,42150,150.2,1704074399999",
+                    ]
+                ),
+            )
+
+        result = ingest_binance_archives(
+            store=store,
+            symbol="BTC/USDT",
+            timeframe="1h",
+            since=date(2024, 1, 1),
+            until=date(2024, 1, 31),
+            cache_dir=tmp_path,
+            include_daily_current_month=False,
+        )
+
+        assert result.files_cached == 1
+        assert result.candles_seen == 2
+        assert result.rows_inserted == 2
+        inventory = store.get_inventory(symbol="BTC/USDT", timeframe="1h")
+        assert len(inventory) == 1
+        assert inventory[0].rows == 2
 
 
 # ---------------------------------------------------------------------------
@@ -586,6 +648,87 @@ class TestCLI:
         assert result.exit_code == 0
         assert "Binance" in result.stdout
         assert "has_fetch_ohlcv" in result.stdout
+
+    @patch("data_fetcher.cli.ingest_binance_archives")
+    def test_bulk_fetch_command_explicit_symbols(self, mock_ingest: Mock, temp_db: str) -> None:
+        """Verify bulk-fetch invokes archive ingestion for explicit symbols."""
+        mock_ingest.return_value = Mock(
+            rows_inserted=2,
+            candles_seen=2,
+            files_downloaded=1,
+            files_cached=0,
+            files_missing=0,
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "bulk-fetch",
+                "--symbols",
+                "BTC/USDT,ETH/USDT",
+                "--timeframe",
+                "1h",
+                "--since",
+                "2024-01-01",
+                "--until",
+                "2024-01-31",
+                "--db-path",
+                temp_db,
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert mock_ingest.call_count == 2
+        assert "Done. Inserted 4 rows" in result.stdout
+
+    @patch("data_fetcher.providers.crypto.create_exchange")
+    @patch("data_fetcher.cli.ingest_binance_archives")
+    def test_bulk_fetch_monthly_uses_exchange_api(
+        self,
+        mock_ingest: Mock,
+        mock_create: Mock,
+        temp_db: str,
+    ) -> None:
+        """Verify monthly candles avoid archive ZIP probing."""
+        mock_exchange = Mock()
+        mock_exchange.markets = {}
+        mock_exchange.milliseconds.return_value = 1704067200000
+        mock_exchange.parse8601.return_value = 1704067200000
+        mock_exchange.fetch_ohlcv.side_effect = [
+            [[1501545600000, 100.0, 101.0, 99.0, 100.5, 10.0]],
+            [
+                [1501545600000, 100.0, 101.0, 99.0, 100.5, 10.0],
+                [1504224000000, 101.0, 102.0, 100.0, 101.5, 15.0],
+            ],
+        ]
+        mock_exchange.iso8601.side_effect = [
+            "2017-08-01T00:00:00.000Z",
+            "2017-08-01T00:00:00.000Z",
+            "2017-09-01T00:00:00.000Z",
+        ]
+        mock_create.return_value = mock_exchange
+
+        result = runner.invoke(
+            app,
+            [
+                "bulk-fetch",
+                "--symbols",
+                "BTC/USDT",
+                "--timeframe",
+                "1M",
+                "--since",
+                "earliest",
+                "--until",
+                "2024-01-01",
+                "--db-path",
+                temp_db,
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert mock_ingest.call_count == 0
+        assert "through the exchange API" in result.stdout
+        assert "Inserted 2 rows" in result.stdout
 
 
 # ---------------------------------------------------------------------------

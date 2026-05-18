@@ -8,6 +8,11 @@ from typing import Dict, List, Optional
 
 import typer
 
+from data_fetcher.providers.binance_archive import (
+    BINANCE_SPOT_ARCHIVE_START,
+    ingest_binance_archives,
+    parse_date_bound,
+)
 from data_fetcher.providers.crypto import (
     CryptoDataFetcher,
     DEFAULT_EXCHANGE,
@@ -422,6 +427,212 @@ def fetch(
 
 
 @app.command()
+def bulk_fetch(
+    symbols: Optional[str] = typer.Option(None, "--symbols", "-s", help="Comma-separated symbol list"),
+    symbols_file: Optional[Path] = typer.Option(None, "--symbols-file", "-f", help="File with one symbol per line"),
+    quote: Optional[str] = typer.Option(None, "--quote", "-q", help="Filter by quote currency (auto-discover)"),
+    timeframe: str = typer.Option("1h", "--timeframe", "-t", help="Candle timeframe"),
+    since: str = typer.Option("earliest", "--since", help="Start: 'earliest', 'YYYY-MM-DD'"),
+    until: str = typer.Option("now", "--until", help="End: 'now' or 'YYYY-MM-DD'"),
+    db_path: str = typer.Option("data/crypto_ohlcv.db", "--db-path", "-d", help="Path to SQLite database"),
+    cache_dir: Path = typer.Option("data/archive_cache", "--cache-dir", help="Directory for downloaded archive ZIPs"),
+    resume: bool = typer.Option(True, "--resume/--no-resume", help="Skip rows already present locally"),
+    limit_symbols: int = typer.Option(0, "--limit-symbols", "-n", help="Max symbols to fetch (0 = unlimited)"),
+    include_daily_current_month: bool = typer.Option(
+        True,
+        "--include-daily-current-month/--monthly-only",
+        help="Use daily ZIPs to fill the current month after monthly archive files",
+    ),
+) -> None:
+    """Bulk ingest Binance public archive OHLCV ZIPs into SQLite."""
+    symbol_list: List[str] = []
+    if symbols:
+        symbol_list.extend(s.strip() for s in symbols.split(",") if s.strip())
+    if symbols_file:
+        symbol_list.extend(_read_symbol_file(symbols_file))
+
+    if not symbol_list:
+        typer.echo("No symbols specified, discovering active Binance spot symbols...")
+        fetcher = CryptoDataFetcher(exchange_id="binance")
+        discovered = fetcher.get_symbols(quote=quote, active_only=True, spot_only=True)
+        symbol_list = [r["symbol"] for r in discovered]
+
+    if limit_symbols > 0:
+        symbol_list = symbol_list[:limit_symbols]
+
+    if not symbol_list:
+        typer.echo("No symbols to fetch.")
+        raise typer.Exit(code=0)
+
+    try:
+        since_date = parse_date_bound(since, BINANCE_SPOT_ARCHIVE_START)
+        until_date = parse_date_bound(until, datetime_now_utc_date())
+    except ValueError as exc:
+        typer.echo(f"Invalid date bound: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if until_date < since_date:
+        typer.echo("--until must be on or after --since", err=True)
+        raise typer.Exit(code=1)
+
+    store = SQLiteStore(db_path)
+
+    if timeframe == "1M":
+        _bulk_fetch_sparse_timeframe(
+            store=store,
+            symbol_list=symbol_list,
+            timeframe=timeframe,
+            since=since,
+            until=until,
+            resume=resume,
+        )
+        return
+
+    typer.echo(
+        f"Bulk fetching {len(symbol_list)} Binance symbols [{timeframe}] "
+        f"from {since_date} to {until_date}"
+    )
+    typer.echo(f"Archive cache: {Path(cache_dir).expanduser()}")
+
+    total_inserted = 0
+    total_seen = 0
+    for i, sym in enumerate(symbol_list):
+        typer.echo(f"\n[{i+1}/{len(symbol_list)}] {sym}")
+        try:
+            result = ingest_binance_archives(
+                store=store,
+                symbol=sym,
+                timeframe=timeframe,
+                since=since_date,
+                until=until_date,
+                cache_dir=Path(cache_dir).expanduser(),
+                resume=resume,
+                include_daily_current_month=include_daily_current_month,
+            )
+        except Exception as exc:
+            typer.echo(f"  Error: {exc}", err=True)
+            continue
+
+        total_inserted += result.rows_inserted
+        total_seen += result.candles_seen
+        typer.echo(
+            "  "
+            f"Inserted {result.rows_inserted} rows "
+            f"({result.candles_seen} candles, "
+            f"{result.files_downloaded} downloaded, "
+            f"{result.files_cached} cached, "
+            f"{result.files_missing} missing)"
+        )
+
+    typer.echo(f"\nDone. Inserted {total_inserted} rows from {total_seen} candles.")
+
+
+def _parse_exchange_bound(fetcher: CryptoDataFetcher, value: str, now_ms: int) -> Optional[int]:
+    if value == "earliest":
+        return None
+    if value == "now":
+        return now_ms
+    if value.isdigit():
+        return int(value)
+    parsed = fetcher.exchange.parse8601(f"{value}T00:00:00Z")
+    return int(parsed) if parsed is not None else None
+
+
+def _bulk_fetch_sparse_timeframe(
+    *,
+    store: SQLiteStore,
+    symbol_list: List[str],
+    timeframe: str,
+    since: str,
+    until: str,
+    resume: bool,
+) -> None:
+    """Fetch sparse timeframes through CCXT instead of archive ZIPs.
+
+    Binance archive ZIPs are partitioned by calendar month. For a monthly
+    candle interval, that turns into roughly one HTTP file per candle, while
+    CCXT can usually retrieve the whole series in a single request.
+    """
+    fetcher = CryptoDataFetcher(exchange_id="binance")
+    now_ms = int(time_module.time() * 1000)
+    since_ms = _parse_exchange_bound(fetcher, since, now_ms)
+    until_ms = _parse_exchange_bound(fetcher, until, now_ms)
+
+    typer.echo(
+        f"Bulk fetching {len(symbol_list)} Binance symbols [{timeframe}] "
+        "through the exchange API because archive ZIPs are inefficient for "
+        "monthly candles"
+    )
+
+    total_inserted = 0
+    total_seen = 0
+    for i, sym in enumerate(symbol_list):
+        typer.echo(f"\n[{i+1}/{len(symbol_list)}] {sym}")
+
+        effective_since = since_ms
+        local_max_ms = store.get_max_timestamp("binance", sym, timeframe)
+        if resume and local_max_ms is not None:
+            effective_since = local_max_ms + 1
+            typer.echo(f"  Resuming from timestamp {effective_since}")
+
+        if effective_since is None:
+            earliest_ts, method = fetcher.fetch_earliest_timestamp(sym, timeframe)
+            if earliest_ts is None:
+                typer.echo("  Could not determine earliest timestamp, skipping.")
+                continue
+            effective_since = earliest_ts
+            typer.echo(f"  Earliest data: {earliest_ts} ({method})")
+
+        candles = fetcher.fetch_ohlcv(
+            symbol=sym,
+            timeframe=timeframe,
+            since=effective_since,
+            until=until_ms,
+            limit=1000,
+            sleep_seconds=0.0,
+        )
+        if not candles:
+            typer.echo("  No data returned.")
+            continue
+
+        rows = []
+        for candle in candles:
+            ms = int(candle[0])
+            rows.append(
+                (
+                    ms,
+                    fetcher.exchange.iso8601(ms),
+                    "binance",
+                    sym,
+                    timeframe,
+                    float(candle[1]),
+                    float(candle[2]),
+                    float(candle[3]),
+                    float(candle[4]),
+                    float(candle[5]),
+                )
+            )
+
+        inserted = store.insert_ohlcv(rows)
+        total_inserted += inserted
+        total_seen += len(candles)
+        typer.echo(f"  Inserted {inserted} rows ({len(candles)} candles fetched)")
+
+    typer.echo(f"\nDone. Inserted {total_inserted} rows from {total_seen} candles.")
+
+
+def datetime_now_utc_date():
+    """Return today's UTC date.
+
+    Small helper keeps Typer defaults static while allowing tests to patch the
+    date parser independently from import time.
+    """
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).date()
+
+
+@app.command()
 def inventory(
     db_path: str = typer.Option("data/crypto_ohlcv.db", "--db-path", "-d", help="Path to SQLite database"),
     exchange: Optional[str] = typer.Option(None, "--exchange", "-e", help="Filter by exchange"),
@@ -523,6 +734,7 @@ crypto_app.command("exchanges")(exchanges)
 crypto_app.command("symbols")(symbols)
 crypto_app.command("start-dates")(start_dates)
 crypto_app.command("fetch")(fetch)
+crypto_app.command("bulk-fetch")(bulk_fetch)
 crypto_app.command("inventory")(inventory)
 crypto_app.command("validate")(validate)
 app.add_typer(crypto_app, name="crypto")

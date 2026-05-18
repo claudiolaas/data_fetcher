@@ -56,6 +56,7 @@ exchanges
 symbols
 start-dates
 fetch
+bulk-fetch
 inventory
 validate
 crypto ...
@@ -69,6 +70,7 @@ also available:
 uv run data-fetcher crypto symbols --exchange binance --quote USDT
 uv run data-fetcher crypto start-dates --exchange binance --symbols BTC/USDT
 uv run data-fetcher crypto fetch --exchange binance --symbols BTC/USDT
+uv run data-fetcher crypto bulk-fetch --symbols BTC/USDT
 uv run data-fetcher alpaca symbols
 ```
 
@@ -231,6 +233,53 @@ Fetch behavior:
 --until is enforced, so candles after the requested bound are not returned
 --sleep-seconds controls pagination pacing and symbol-to-symbol pacing
 --workers and --fail-fast are reserved for future use
+```
+
+### Bulk Fetch Binance Archives
+
+For large Binance backfills, use the public archive ZIP ingestion path. This is
+much faster than paginating through the exchange API because it downloads
+monthly candle files and inserts them directly into the same SQLite schema.
+
+Discover active USDT symbols, then ingest their complete 1h archive history:
+
+```bash
+uv run data-fetcher symbols \
+  --exchange binance \
+  --quote USDT \
+  --active-only \
+  --limit 0 \
+  --format symbols > symbols.txt
+
+uv run data-fetcher bulk-fetch \
+  --symbols-file symbols.txt \
+  --timeframe 1h \
+  --since earliest \
+  --until now \
+  --db-path data/crypto_ohlcv.db \
+  --cache-dir data/archive_cache
+```
+
+You can also let the command discover Binance spot symbols by quote:
+
+```bash
+uv run data-fetcher bulk-fetch \
+  --quote USDT \
+  --timeframe 1h \
+  --since earliest \
+  --db-path data/crypto_ohlcv.db
+```
+
+Bulk fetch behavior:
+
+```text
+only Binance spot public archives are supported
+monthly ZIPs are used for completed months
+daily ZIPs are used for the current month unless --monthly-only is passed
+--timeframe 1M uses the exchange API because archive ZIPs are inefficient for monthly candles
+downloaded ZIPs are cached under --cache-dir
+--resume is enabled by default and skips locally stored candles
+inserts are idempotent through the SQLite unique constraint
 ```
 
 ### Inventory
